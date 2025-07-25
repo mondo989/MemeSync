@@ -140,10 +140,33 @@ class SlideRenderer {
                 img.src = memeUrl;
             }, memeUrl);
             
-            // Wait for image to load
+            // Handle apu-logo overlay
+            const logoPath = path.join(this.slidesDir, 'apu-logo.png');
+            const isApuSlide = filename.includes('apu-slide') || memeUrl.includes('apu-slide.png');
+            const shouldShowLogo = !isApuSlide && await this.fileExists(logoPath);
+            
+            if (shouldShowLogo) {
+                await page.evaluate((logoPath) => {
+                    const logoImg = document.getElementById('apu-logo');
+                    logoImg.src = `file://${logoPath}`;
+                    logoImg.classList.remove('hidden');
+                }, logoPath);
+                
+                Logger.debug(`Added apu-logo overlay to slide: ${filename}`);
+            } else {
+                Logger.debug(`Skipping apu-logo overlay for: ${filename} (${isApuSlide ? 'apu-slide detected' : 'logo file not found'})`);
+            }
+            
+            // Wait for images to load
             await page.waitForFunction(() => {
                 const img = document.getElementById('meme-image');
-                return img.complete && img.naturalHeight !== 0;
+                const logo = document.getElementById('apu-logo');
+                const logoIsHidden = logo.classList.contains('hidden');
+                
+                const mainImageLoaded = img.complete && img.naturalHeight !== 0;
+                const logoLoadedOrHidden = logoIsHidden || (logo.complete && logo.naturalHeight !== 0);
+                
+                return mainImageLoaded && logoLoadedOrHidden;
             }, { timeout: 10000 });
             
             // Small delay to ensure rendering is complete
@@ -185,6 +208,20 @@ class SlideRenderer {
             Logger.info('Slides directory cleaned up');
         } catch (error) {
             Logger.warn('Failed to cleanup slides directory:', error.message);
+        }
+    }
+
+    /**
+     * Check if a file exists
+     * @param {string} filepath - Path to check
+     * @returns {boolean} - True if file exists
+     */
+    async fileExists(filepath) {
+        try {
+            await fs.access(filepath);
+            return true;
+        } catch {
+            return false;
         }
     }
 }

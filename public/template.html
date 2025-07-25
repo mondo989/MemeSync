@@ -33,11 +33,32 @@
             object-fit: contain; /* Maintain aspect ratio without cropping */
             border-radius: 15px;
         }
+
+        .meme-container {
+            position: relative;
+        }
+
+        .apu-logo-overlay {
+            position: absolute;
+            bottom: -125px; /* Bottom 10% of viewport (90% from top) */
+            left: 50%;
+            transform: translateX(-50%); /* Center horizontally only */
+            z-index: 9999; /* Highest z-index to appear over memes */
+            max-width: 15%; /* Responsive size */
+            max-height: 8%; /* Limit height to prevent being too large */
+            opacity: 0.9; /* Slightly transparent so it doesn't completely obstruct */
+            pointer-events: none; /* Don't interfere with interactions */
+        }
+
+        .apu-logo-overlay.hidden {
+            display: none;
+        }
     </style>
 </head>
 <body>
     <div class="meme-container">
         <img id="meme-image" class="meme-image" src="" alt="Meme">
+        <img id="apu-logo" class="apu-logo-overlay hidden" src="" alt="APU Logo">
     </div>
 </body>
 </html> 
