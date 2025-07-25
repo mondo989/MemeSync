@@ -376,39 +376,29 @@ class VideoRenderer {
         Logger.info(`📏 Total expected video duration: ${totalExpectedDuration.toFixed(3)}s`);
 
         try {
-            // Method: Create individual segments then concatenate (more reliable)
-            const segmentPaths = [];
+            // Create slides data file for MoviePy
+            const slidesData = slides.map(slide => ({
+                path: slide.path,
+                startTime: slide.startTime,
+                endTime: slide.endTime
+            }));
             
-            // Create each slide as a separate video segment
-            for (let i = 0; i < slides.length; i++) {
-                const slide = slides[i];
-                const duration = slide.endTime - slide.startTime;
-                const segmentPath = path.join(this.mediaDir, `segment_${i}.mp4`);
-                
-                Logger.info(`🎬 Creating segment ${i + 1}/${slides.length}: ${duration.toFixed(3)}s`);
-                
-                await this.createSlideSegment(slide.path, duration, segmentPath);
-                
-                // Verify segment duration
-                const actualDuration = await this.getVideoDuration(segmentPath);
-                Logger.info(`✅ Segment ${i + 1} created: expected ${duration.toFixed(3)}s, actual ${actualDuration.toFixed(3)}s`);
-                
-                segmentPaths.push(segmentPath);
+            const slidesDataPath = path.join(this.mediaDir, 'slides_data.json');
+            await fs.writeFile(slidesDataPath, JSON.stringify(slidesData, null, 2));
+            
+            Logger.info('🐍 Using MoviePy for precise video rendering...');
+            
+            // Call MoviePy renderer
+            await this.renderWithMoviePy(slidesDataPath, audioPath);
+            
+            // Clean up temp files
+            try {
+                await fs.unlink(slidesDataPath);
+            } catch (e) {
+                // Ignore cleanup errors
             }
             
-            // Concatenate all segments with audio
-            await this.concatenateSegmentsWithAudio(segmentPaths, audioPath);
-            
-            // Clean up segment files
-            for (const segmentPath of segmentPaths) {
-                try {
-                    await fs.unlink(segmentPath);
-                } catch (e) {
-                    // Ignore cleanup errors
-                }
-            }
-            
-            Logger.success('Precisely timed slideshow created successfully!');
+            Logger.success('Precisely timed slideshow created successfully with MoviePy!');
             
         } catch (error) {
             Logger.error('Timed slideshow creation failed:', error.message);
@@ -417,199 +407,72 @@ class VideoRenderer {
     }
 
     /**
-     * Create a single slide segment with larger image size
-     * @param {string} imagePath - Path to slide image
-     * @param {number} duration - Duration in seconds
-     * @param {string} outputPath - Output path for segment
+     * Render video using MoviePy Python script
+     * @param {string} slidesDataPath - Path to slides JSON data
+     * @param {string} audioPath - Path to audio file
      */
-    async createSlideSegment(imagePath, duration, outputPath) {
+    async renderWithMoviePy(slidesDataPath, audioPath) {
         return new Promise((resolve, reject) => {
-            ffmpeg(imagePath)
-                .inputOptions(['-loop 1'])
-                .videoFilters([
-                    // Scale image to take up 75% of screen (larger presence)
-                    'scale=1920:1080:force_original_aspect_ratio=increase',
-                    'crop=1920:1080',
-                    'scale=1440:810', // 75% of 1920x1080
-                    'pad=1920:1080:(ow-iw)/2:(oh-ih)/2:black@0.1', // Subtle dark background
-                    'fps=24'
-                ])
-                .outputOptions([
-                    '-c:v libx264',
-                    '-preset slower', // Highest quality encoding
-                    '-crf 15', // Very high quality
-                    '-b:v 1500k', // High bitrate for segments
-                    '-pix_fmt yuv420p',
-                    '-profile:v high',
-                    '-level:v 4.0',
-                    '-r', '30', // 30fps for smooth playback
-                    '-t', duration.toFixed(3) // Precise timing
-                ])
-                .output(outputPath)
-                .on('end', resolve)
-                .on('error', reject)
-                .run();
-        });
-    }
-
-    /**
-     * Concatenate video segments with beautiful transitions and audio
-     * @param {Array} segmentPaths - Array of segment file paths
-     * @param {string} audioPath - Audio file path
-     */
-    async concatenateSegmentsWithAudio(segmentPaths, audioPath) {
-        return new Promise((resolve, reject) => {
-            Logger.info('Creating video with beautiful transitions...');
+            const { spawn } = require('child_process');
             
-            let command = ffmpeg();
+            // Path to the MoviePy script
+            const pythonScript = path.join(__dirname, 'moviepy_renderer.py');
             
-            // Add all segments
-            segmentPaths.forEach(segmentPath => {
-                command = command.addInput(segmentPath);
+            Logger.info(`🐍 Starting MoviePy renderer...`);
+            Logger.info(`📄 Slides data: ${slidesDataPath}`);
+            Logger.info(`🎵 Audio: ${audioPath}`);
+            Logger.info(`📹 Output: ${this.outputPath}`);
+            
+            // Spawn Python process
+            const pythonProcess = spawn('python3', [
+                pythonScript,
+                '--slides', slidesDataPath,
+                '--audio', audioPath,
+                '--output', this.outputPath
+            ], {
+                stdio: ['pipe', 'pipe', 'pipe']
             });
             
-            // Add audio
-            command = command.addInput(audioPath);
+            let stdout = '';
+            let stderr = '';
             
-            // Create beautiful transition effects with proper timing
-            const transitionDuration = 0.5; // 0.5 second transitions
-            const transitions = [
-                'fade', 'fadeblack', 'fadewhite', 'wipeleft', 'wiperight',
-                'wipeup', 'wipedown', 'slideleft', 'slideright', 'slideup', 'slidedown',
-                'circlecrop', 'rectcrop', 'dissolve'
-            ];
-            
-            if (segmentPaths.length === 1) {
-                // Single segment, no transitions needed
-                const simpleFilter = '[0:v]scale=1920:1080[outv]';
-                command.complexFilter(simpleFilter);
-            } else {
-                // Use simple concatenation with crossfade overlays for reliable timing
-                const filters = [];
-                
-                // First, scale all inputs
-                for (let i = 0; i < segmentPaths.length; i++) {
-                    filters.push(`[${i}:v]scale=1920:1080,fps=30[v${i}]`);
-                }
-                
-                // Simple concatenation to preserve exact timing
-                const concatInputs = [];
-                for (let i = 0; i < segmentPaths.length; i++) {
-                    concatInputs.push(`[v${i}]`);
-                }
-                
-                filters.push(`${concatInputs.join('')}concat=n=${segmentPaths.length}:v=1:a=0[outv]`);
-                
-                const filterComplex = filters.join(';');
-                Logger.debug('Filter complex:', filterComplex);
-                command.complexFilter(filterComplex);
-            }
-            
-            command
-                .outputOptions([
-                    '-map [outv]',
-                    `-map ${segmentPaths.length}:a`,
-                    '-c:v libx264',
-                    '-preset slower', // Highest quality encoding
-                    '-crf 15', // Very high quality (lower = better)
-                    '-b:v 2000k', // Force high video bitrate
-                    '-maxrate 3000k', // Allow peaks for detailed scenes
-                    '-bufsize 6000k', // Buffer for quality
-                    '-c:a aac',
-                    '-b:a 320k', // Highest audio quality
-                    '-pix_fmt yuv420p',
-                    '-profile:v high', // High profile for better quality
-                    '-level:v 4.0', // Advanced level
-                    '-movflags +faststart', // Web optimization
-                    '-shortest'
-                ])
-                .output(this.outputPath)
-                .on('start', (commandLine) => {
-                    Logger.debug('FFmpeg command with transitions:', commandLine);
-                })
-                .on('progress', (progress) => {
-                    if (progress.percent) {
-                        Logger.info(`Final video with transitions: ${Math.round(progress.percent)}%`);
+            pythonProcess.stdout.on('data', (data) => {
+                const output = data.toString();
+                stdout += output;
+                // Log MoviePy output in real-time
+                output.split('\n').forEach(line => {
+                    if (line.trim()) {
+                        Logger.info(`MoviePy: ${line.trim()}`);
                     }
-                })
-                .on('end', () => {
-                    Logger.success('Beautiful video with transitions created!');
-                    resolve();
-                })
-                .on('error', (error) => {
-                    Logger.error('Transition video creation failed:', error.message);
-                    reject(error);
-                })
-                .run();
-        });
-    }
-
-    /**
-     * Create simple video with equal slide durations
-     * @param {Array} slides - Array of slide objects
-     * @param {string} audioPath - Path to audio file
-     * @param {number} slideDuration - Duration per slide in seconds
-     */
-    async createSimpleVideo(slides, audioPath, slideDuration = 3) {
-        return new Promise((resolve, reject) => {
-            Logger.info(`Creating video with ${slides.length} slides, ${slideDuration.toFixed(1)}s each`);
+                });
+            });
             
-            // Use simple, reliable approach: create slideshow from images with audio overlay
-            let command = ffmpeg();
-            
-            // Simple, reliable approach: loop first image with audio
-            command = command
-                .addInput(slides[0].path)
-                .inputOptions(['-loop 1'])
-                .addInput(audioPath)
-                .videoFilters([
-                    'scale=1280:720:force_original_aspect_ratio=decrease',
-                    'pad=1280:720:(ow-iw)/2:(oh-ih)/2',
-                    'fps=24'
-                ])
-                .outputOptions([
-                    '-c:v libx264',
-                    '-preset fast',
-                    '-crf 28',
-                    '-c:a aac',
-                    '-b:a 128k',
-                    '-pix_fmt yuv420p',
-                    '-shortest' // Video duration matches audio
-                ])
-                .output(this.outputPath)
-                .on('start', (commandLine) => {
-                    Logger.debug('FFmpeg command:', commandLine);
-                })
-                .on('progress', (progress) => {
-                    if (progress.percent) {
-                        Logger.info(`Video progress: ${Math.round(progress.percent)}%`);
+            pythonProcess.stderr.on('data', (data) => {
+                const output = data.toString();
+                stderr += output;
+                // Log errors but don't fail immediately (MoviePy can be verbose)
+                output.split('\n').forEach(line => {
+                    if (line.trim() && !line.includes('WARNING')) {
+                        Logger.warn(`MoviePy: ${line.trim()}`);
                     }
-                })
-                .on('end', () => {
-                    Logger.success('Video created successfully');
+                });
+            });
+            
+            pythonProcess.on('close', (code) => {
+                if (code === 0) {
+                    Logger.success('🎉 MoviePy rendering completed successfully!');
                     resolve();
-                })
-                .on('error', (error) => {
-                    Logger.error('Video creation failed:', error.message);
-                    reject(error);
-                })
-                .run();
-        });
-    }
-
-    /**
-     * Get audio duration
-     * @param {string} audioPath - Path to audio file
-     * @returns {Promise<number>} - Duration in seconds
-     */
-    async getAudioDuration(audioPath) {
-        return new Promise((resolve, reject) => {
-            ffmpeg.ffprobe(audioPath, (err, metadata) => {
-                if (err) {
-                    reject(err);
                 } else {
-                    resolve(metadata.format.duration);
+                    Logger.error(`MoviePy process exited with code ${code}`);
+                    Logger.error(`STDOUT: ${stdout}`);
+                    Logger.error(`STDERR: ${stderr}`);
+                    reject(new Error(`MoviePy rendering failed with exit code ${code}`));
                 }
+            });
+            
+            pythonProcess.on('error', (error) => {
+                Logger.error('Failed to start MoviePy process:', error);
+                reject(new Error(`Failed to start MoviePy: ${error.message}`));
             });
         });
     }

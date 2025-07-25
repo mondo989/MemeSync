@@ -30,7 +30,7 @@ class PuppeteerScraper {
         const launchConfigs = [
             // Use system Chrome (most stable)
             {
-                headless: true, // Back to headless for production
+                headless: 'new', // Back to headless for production
                 executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
                 args: [
                     '--no-sandbox',
@@ -42,7 +42,7 @@ class PuppeteerScraper {
             },
             // Fallback to Puppeteer's Chrome
             {
-                headless: true,
+                headless: 'new',
                 args: ['--no-sandbox', '--disable-setuid-sandbox'],
                 timeout: 10000
             }
@@ -110,8 +110,8 @@ class PuppeteerScraper {
                 } catch (navError) {
                     Logger.warn(`⚠️ Navigation attempt ${retry} failed: ${navError.message}`);
                     if (retry < maxRetries) {
-                        Logger.debug('⏳ Waiting 2 seconds before retry...');
-                        await page.waitForTimeout(2000);
+                        Logger.debug('⏳ Waiting 1 second before retry...');
+                        await page.waitForTimeout(1000);
                     }
                 }
             }
@@ -248,7 +248,7 @@ class PuppeteerScraper {
         Logger.info(`Starting meme scraping from: ${this.memesSiteUrl}`);
         
         const browser = await puppeteer.launch({
-            headless: false,
+            headless: 'new',
             executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
             args: [
                 '--no-sandbox', 

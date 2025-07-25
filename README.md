@@ -11,7 +11,7 @@ This project generates a meme-driven music video by taking a YouTube URL and ret
 - Optional: Add a thumbnail meme at the beginning of the video
 
 - Input: YouTube URL (with optional start and end time)
-- Output: An MP4 video with meme images synchronized approximately to the lyrics
+- Output: An MP4 video with meme images synchronized precisely to the lyrics
 - No user interface required (CLI-based MVP)
 - Automation: No manual tagging or editing
 - Works entirely offline/local, except for:
@@ -30,7 +30,8 @@ meme-music-gen/
 │   ├── keywordExtractor.js    # Extracts and scores keywords
 │   ├── matchMemes.js          # Matches lyrics to memes
 │   ├── renderSlides.js        # Creates slide HTML + animation per meme
-│   ├── renderVideo.js         # Uses FFmpeg to compile images/audio
+│   ├── renderVideo.js         # Video orchestration (now uses MoviePy)
+│   ├── moviepy_renderer.py    # Python script for precise video rendering
 │   └── utils/
 │       ├── timeHelpers.js     # Duration formatting, slicing
 │       └── logger.js
@@ -41,9 +42,35 @@ meme-music-gen/
 │   └── output.mp4             # Final video
 ├── public/
 │   └── template.html          # Slide layout template
+├── requirements.txt           # Python dependencies for MoviePy
+├── setup_moviepy.sh          # MoviePy setup script
 ├── .env
 ├── .gitignore
 └── package.json
+```
+
+---
+
+## 🚀 Setup & Installation
+
+### 1. Node.js Dependencies
+```bash
+npm install
+```
+
+### 2. MoviePy Setup (Required for video rendering)
+```bash
+# Run the automated setup script
+./setup_moviepy.sh
+
+# Or install manually:
+pip3 install -r requirements.txt
+```
+
+### 3. Environment Variables
+Create a `.env` file:
+```
+# Optional: Add any API keys or configuration
 ```
 
 ---
