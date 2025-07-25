@@ -1,0 +1,471 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Meme Sync - Meme Video Generator</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+
+        .container {
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            border-radius: 20px;
+            padding: 40px;
+            max-width: 600px;
+            width: 100%;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 40px;
+        }
+
+        .header h1 {
+            color: #2d3748;
+            font-size: 2.5rem;
+            font-weight: 700;
+            margin-bottom: 8px;
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .header p {
+            color: #718096;
+            font-size: 1.1rem;
+        }
+
+        .form-group {
+            margin-bottom: 24px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 8px;
+            color: #2d3748;
+            font-weight: 600;
+            font-size: 0.9rem;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        input[type="text"], input[type="url"] {
+            width: 100%;
+            padding: 16px;
+            border: 2px solid #e2e8f0;
+            border-radius: 12px;
+            font-size: 1rem;
+            transition: all 0.3s ease;
+            background: #f7fafc;
+        }
+
+        input[type="text"]:focus, input[type="url"]:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+            background: white;
+        }
+
+        .time-inputs {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 16px;
+        }
+
+        .button {
+            width: 100%;
+            padding: 16px;
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            color: white;
+            border: none;
+            border-radius: 12px;
+            font-size: 1.1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 20px rgba(102, 126, 234, 0.3);
+        }
+
+        .button:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
+        }
+
+        .progress-container {
+            display: none;
+            margin-top: 30px;
+            padding: 20px;
+            background: #f7fafc;
+            border-radius: 12px;
+            border: 2px solid #e2e8f0;
+        }
+
+        .progress-bar {
+            width: 100%;
+            height: 8px;
+            background: #e2e8f0;
+            border-radius: 4px;
+            overflow: hidden;
+            margin-bottom: 12px;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            border-radius: 4px;
+            width: 0%;
+            transition: width 0.3s ease;
+        }
+
+        .progress-text {
+            color: #4a5568;
+            font-weight: 500;
+            text-align: center;
+        }
+
+        .result-container {
+            display: none;
+            margin-top: 30px;
+            padding: 20px;
+            background: #f0fff4;
+            border: 2px solid #9ae6b4;
+            border-radius: 12px;
+            text-align: center;
+        }
+
+        .error-container {
+            display: none;
+            margin-top: 30px;
+            padding: 20px;
+            background: #fed7d7;
+            border: 2px solid #fc8181;
+            border-radius: 12px;
+            text-align: center;
+        }
+
+        .download-button {
+            background: #48bb78;
+            margin-top: 16px;
+            text-decoration: none;
+            display: inline-block;
+        }
+
+        .download-button:hover {
+            background: #38a169;
+            text-decoration: none;
+            color: white;
+        }
+
+        .cleanup-button {
+            background: #ed8936;
+            margin-top: 12px;
+            padding: 8px 16px;
+            font-size: 0.9rem;
+        }
+
+        .cleanup-button:hover {
+            background: #dd6b20;
+        }
+
+        .tip {
+            background: #bee3f8;
+            padding: 16px;
+            border-radius: 12px;
+            margin-top: 20px;
+            color: #2b6cb0;
+            font-size: 0.9rem;
+            border-left: 4px solid #4299e1;
+        }
+
+        .tip strong {
+            color: #2c5282;
+        }
+
+        @media (max-width: 640px) {
+            .container {
+                padding: 24px;
+                margin: 10px;
+            }
+            
+            .header h1 {
+                font-size: 2rem;
+            }
+            
+            .time-inputs {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🎬 Meme Sync</h1>
+            <p>Generate meme-driven music videos from YouTube</p>
+        </div>
+
+        <form id="generateForm">
+            <div class="form-group">
+                <label for="youtubeUrl">YouTube URL</label>
+                <input 
+                    type="url" 
+                    id="youtubeUrl" 
+                    name="youtubeUrl" 
+                    placeholder="https://www.youtube.com/watch?v=..."
+                    value="https://www.youtube.com/watch?v=9bZkp7q19f0"
+                    required
+                >
+            </div>
+
+            <div class="form-group">
+                <label>Time Range (Optional)</label>
+                <div class="time-inputs">
+                    <input 
+                        type="text" 
+                        id="startTime" 
+                        name="startTime" 
+                        placeholder="Start (00:30)"
+                        pattern="[0-9]{2}:[0-9]{2}"
+                    >
+                    <input 
+                        type="text" 
+                        id="endTime" 
+                        name="endTime" 
+                        placeholder="End (01:15)"
+                        pattern="[0-9]{2}:[0-9]{2}"
+                    >
+                </div>
+            </div>
+
+            <button type="submit" class="button" id="generateBtn">
+                🚀 Generate Meme Video
+            </button>
+        </form>
+
+        <div class="progress-container" id="progressContainer">
+            <div class="progress-bar">
+                <div class="progress-fill" id="progressFill"></div>
+            </div>
+            <div class="progress-text" id="progressText">Initializing...</div>
+        </div>
+
+        <div class="result-container" id="resultContainer">
+            <h3 style="color: #22543d; margin-bottom: 12px;">🎉 Video Generated Successfully!</h3>
+            <p style="color: #2f855a; margin-bottom: 16px;">Your meme video is ready for download.</p>
+            <a href="#" class="button download-button" id="downloadBtn">📥 Download Video</a>
+        </div>
+
+        <div class="error-container" id="errorContainer">
+            <h3 style="color: #c53030; margin-bottom: 12px;">❌ Generation Failed</h3>
+            <p style="color: #e53e3e;" id="errorMessage">An error occurred during video generation.</p>
+        </div>
+
+        <button class="button cleanup-button" id="cleanupBtn">
+            🧹 Cleanup Files
+        </button>
+
+        <div class="tip">
+            <strong>💡 Tips:</strong>
+            <br>• Use shorter time ranges (30-60 seconds) for faster processing
+            <br>• Popular music videos work best for transcription
+            <br>• The first generation may take longer as it downloads dependencies
+        </div>
+    </div>
+
+    <script>
+        const form = document.getElementById('generateForm');
+        const generateBtn = document.getElementById('generateBtn');
+        const progressContainer = document.getElementById('progressContainer');
+        const progressFill = document.getElementById('progressFill');
+        const progressText = document.getElementById('progressText');
+        const resultContainer = document.getElementById('resultContainer');
+        const errorContainer = document.getElementById('errorContainer');
+        const downloadBtn = document.getElementById('downloadBtn');
+        const cleanupBtn = document.getElementById('cleanupBtn');
+        const errorMessage = document.getElementById('errorMessage');
+
+        let currentJobId = null;
+        let eventSource = null;
+
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const formData = new FormData(form);
+            const data = {
+                youtubeUrl: formData.get('youtubeUrl'),
+                startTime: formData.get('startTime') || null,
+                endTime: formData.get('endTime') || null
+            };
+
+            // Validate YouTube URL
+            if (!data.youtubeUrl.includes('youtube.com') && !data.youtubeUrl.includes('youtu.be')) {
+                alert('Please enter a valid YouTube URL');
+                return;
+            }
+
+            // Validate time format
+            if (data.startTime && !/^\d{2}:\d{2}$/.test(data.startTime)) {
+                alert('Please enter start time in MM:SS format (e.g., 00:30)');
+                return;
+            }
+            if (data.endTime && !/^\d{2}:\d{2}$/.test(data.endTime)) {
+                alert('Please enter end time in MM:SS format (e.g., 01:15)');
+                return;
+            }
+
+            // Reset UI
+            hideAllContainers();
+            generateBtn.disabled = true;
+            generateBtn.textContent = '🔄 Starting...';
+            progressContainer.style.display = 'block';
+
+            try {
+                const response = await fetch('/api/generate', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(data)
+                });
+
+                const result = await response.json();
+                
+                if (!response.ok) {
+                    throw new Error(result.error);
+                }
+
+                currentJobId = result.jobId;
+                startProgressStream(result.jobId);
+
+            } catch (error) {
+                showError(error.message);
+                resetForm();
+            }
+        });
+
+        function startProgressStream(jobId) {
+            if (eventSource) {
+                eventSource.close();
+            }
+
+            eventSource = new EventSource(`/api/stream/${jobId}`);
+            
+            eventSource.onmessage = (event) => {
+                const job = JSON.parse(event.data);
+                updateProgress(job);
+                
+                if (job.status === 'completed') {
+                    showSuccess(job.outputPath);
+                    eventSource.close();
+                    resetForm();
+                } else if (job.status === 'error') {
+                    showError(job.message);
+                    eventSource.close();
+                    resetForm();
+                }
+            };
+
+            eventSource.onerror = () => {
+                eventSource.close();
+                checkJobStatus(jobId);
+            };
+        }
+
+        async function checkJobStatus(jobId) {
+            try {
+                const response = await fetch(`/api/status/${jobId}`);
+                const job = await response.json();
+                
+                updateProgress(job);
+                
+                if (job.status === 'completed') {
+                    showSuccess(job.outputPath);
+                    resetForm();
+                } else if (job.status === 'error') {
+                    showError(job.message);
+                    resetForm();
+                } else {
+                    setTimeout(() => checkJobStatus(jobId), 2000);
+                }
+            } catch (error) {
+                showError('Failed to check job status');
+                resetForm();
+            }
+        }
+
+        function updateProgress(job) {
+            progressFill.style.width = `${job.progress}%`;
+            progressText.textContent = job.message;
+        }
+
+        function showSuccess(filename) {
+            hideAllContainers();
+            resultContainer.style.display = 'block';
+            downloadBtn.href = `/api/download/${filename}`;
+        }
+
+        function showError(message) {
+            hideAllContainers();
+            errorContainer.style.display = 'block';
+            errorMessage.textContent = message;
+        }
+
+        function hideAllContainers() {
+            progressContainer.style.display = 'none';
+            resultContainer.style.display = 'none';
+            errorContainer.style.display = 'none';
+        }
+
+        function resetForm() {
+            generateBtn.disabled = false;
+            generateBtn.textContent = '🚀 Generate Meme Video';
+        }
+
+        cleanupBtn.addEventListener('click', async () => {
+            cleanupBtn.disabled = true;
+            cleanupBtn.textContent = '🧹 Cleaning...';
+            
+            try {
+                const response = await fetch('/api/cleanup', { method: 'POST' });
+                const result = await response.json();
+                
+                hideAllContainers();
+                alert('✅ Cleanup completed!');
+                
+            } catch (error) {
+                alert('❌ Cleanup failed: ' + error.message);
+            } finally {
+                cleanupBtn.disabled = false;
+                cleanupBtn.textContent = '🧹 Cleanup Files';
+            }
+        });
+
+        // Add example URL for testing
+        document.getElementById('youtubeUrl').placeholder = 'https://www.youtube.com/watch?v=dQw4w9WgXcQ';
+    </script>
+</body>
+</html> 

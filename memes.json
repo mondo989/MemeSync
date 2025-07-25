@@ -1,0 +1,58 @@
+[
+  {
+    "keywords": [
+      "default",
+      "error",
+      "unknown",
+      "fallback"
+    ],
+    "url": "https://i.imgflip.com/30b1gx.jpg"
+  },
+  {
+    "keywords": [
+      "happy",
+      "joy",
+      "celebration",
+      "party",
+      "excited"
+    ],
+    "url": "https://i.imgflip.com/1g8my4.jpg"
+  },
+  {
+    "keywords": [
+      "sad",
+      "cry",
+      "depression",
+      "lonely",
+      "down"
+    ],
+    "url": "https://i.imgflip.com/1biioo.jpg"
+  },
+  {
+    "keywords": [
+      "confused",
+      "what",
+      "lost",
+      "puzzled"
+    ],
+    "url": "https://i.imgflip.com/2zo1ki.jpg"
+  },
+  {
+    "keywords": [
+      "angry",
+      "mad",
+      "rage",
+      "furious"
+    ],
+    "url": "https://i.imgflip.com/1o00in.jpg"
+  },
+  {
+    "keywords": [
+      "love",
+      "heart",
+      "romantic",
+      "valentine"
+    ],
+    "url": "https://i.imgflip.com/26jxvz.jpg"
+  }
+]
