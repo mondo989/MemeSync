@@ -1,0 +1,249 @@
+#!/usr/bin/env node
+
+require('dotenv').config();
+const Logger = require('./utils/logger');
+const TranscriptionService = require('./transcriptionService');
+const KeywordExtractor = require('./keywordExtractor');
+const MemesMatcher = require('./matchMemes');
+const SlideRenderer = require('./renderSlides');
+const VideoRenderer = require('./renderVideo');
+const PuppeteerScraper = require('./puppeteerScraper');
+
+class MemeVideoGenerator {
+    constructor() {
+        this.transcriptionService = new TranscriptionService();
+        this.keywordExtractor = new KeywordExtractor();
+        this.memesMatcher = new MemesMatcher();
+        this.slideRenderer = new SlideRenderer();
+        this.videoRenderer = new VideoRenderer();
+        this.puppeteerScraper = new PuppeteerScraper();
+    }
+
+    /**
+     * Generate meme video from YouTube URL
+     * @param {string} youtubeUrl - YouTube video URL
+     * @param {Object} options - Generation options
+     * @returns {Promise<string>} - Path to generated video
+     */
+    async generateVideo(youtubeUrl, options = {}) {
+        const {
+            startTime = null,
+            endTime = null,
+            thumbnailMemeUrl = null,
+            skipMemeGeneration = false
+        } = options;
+
+        Logger.info('🎬 Starting Meme Video Generation');
+        Logger.info(`YouTube URL: ${youtubeUrl}`);
+        
+        if (startTime && endTime) {
+            Logger.info(`Time range: ${startTime} to ${endTime}`);
+        }
+
+        try {
+            // Step 1: Ensure we have memes database
+            if (!skipMemeGeneration) {
+                await this.ensureMemesDatabase();
+            }
+
+            // Step 2: Download and process audio
+            Logger.info('📥 Step 1/6: Downloading and processing audio...');
+            const audioPath = await this.videoRenderer.downloadAudio(youtubeUrl, startTime, endTime);
+
+            // Step 3: Get transcript with timestamps
+            Logger.info('🎤 Step 2/6: Generating transcript...');
+            const transcript = await this.transcriptionService.getTranscript(youtubeUrl, startTime, endTime);
+            
+            if (transcript.length === 0) {
+                throw new Error('No transcript generated - cannot proceed');
+            }
+
+            // Step 4: Extract keywords from transcript
+            Logger.info('🔍 Step 3/6: Extracting keywords...');
+            const keywordData = await this.keywordExtractor.extractKeywords(transcript);
+
+            // Step 5: Match keywords to memes
+            Logger.info('🎭 Step 4/6: Matching memes...');
+            const matchedMemes = await this.memesMatcher.matchMemes(keywordData);
+
+            // Step 6: Render slides
+            Logger.info('🖼️  Step 5/6: Rendering slides...');
+            const slides = await this.slideRenderer.renderSlides(matchedMemes, thumbnailMemeUrl);
+
+            // Step 7: Create final video
+            Logger.info('🎥 Step 6/6: Creating final video...');
+            const outputPath = await this.videoRenderer.createVideo(slides, audioPath);
+
+            // Get video info
+            const videoInfo = await this.videoRenderer.getVideoInfo(outputPath);
+            
+            Logger.success('🎉 Meme video generation completed!');
+            Logger.success(`📁 Output: ${outputPath}`);
+            Logger.success(`⏱️  Duration: ${Math.round(videoInfo.duration)}s`);
+            Logger.success(`📊 Size: ${Math.round(videoInfo.size / 1024 / 1024)}MB`);
+
+            return outputPath;
+
+        } catch (error) {
+            Logger.error('❌ Video generation failed:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Ensure memes database exists, create if needed
+     */
+    async ensureMemesDatabase() {
+        try {
+            const existingMemes = await this.puppeteerScraper.loadMemes();
+            if (existingMemes.length > 0) {
+                Logger.info(`📚 Found existing memes database: ${existingMemes.length} memes`);
+                return;
+            }
+        } catch (error) {
+            // File doesn't exist, need to create it
+        }
+
+        Logger.info('📥 Memes database not found, creating from default memes...');
+        
+        // Use default memes for now - in production you'd scrape from a real site
+        const defaultMemes = this.puppeteerScraper.getDefaultMemes();
+        await this.puppeteerScraper.saveMemes(defaultMemes);
+        
+        Logger.success(`📚 Created memes database with ${defaultMemes.length} default memes`);
+    }
+
+    /**
+     * Scrape memes from configured website
+     */
+    async scrapeMemes() {
+        Logger.info('🕷️  Starting meme scraping...');
+        
+        try {
+            const memes = await this.puppeteerScraper.scrapeMemes();
+            Logger.success(`✅ Scraped ${memes.length} memes successfully`);
+            return memes;
+        } catch (error) {
+            Logger.error('❌ Meme scraping failed:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Test the pipeline with a sample video
+     */
+    async test() {
+        Logger.info('🧪 Running test pipeline...');
+        
+        const testUrl = 'https://www.youtube.com/watch?v=dQw4w9WgXcQ'; // Rick Roll for testing
+        
+        try {
+            const outputPath = await this.generateVideo(testUrl, {
+                startTime: '00:30',
+                endTime: '00:45',
+                skipMemeGeneration: false
+            });
+            
+            Logger.success('✅ Test completed successfully!');
+            return outputPath;
+            
+        } catch (error) {
+            Logger.error('❌ Test failed:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Clean up all temporary files
+     */
+    async cleanup() {
+        Logger.info('🧹 Cleaning up temporary files...');
+        
+        try {
+            await Promise.all([
+                this.slideRenderer.cleanup(),
+                this.videoRenderer.cleanup()
+            ]);
+            
+            Logger.success('✅ Cleanup completed');
+        } catch (error) {
+            Logger.warn('⚠️  Cleanup failed:', error.message);
+        }
+    }
+}
+
+// CLI Interface
+async function main() {
+    const args = process.argv.slice(2);
+    const generator = new MemeVideoGenerator();
+
+    // Handle different CLI commands
+    if (args.length === 0) {
+        console.log(`
+🎬 Meme Sync - Meme Video Generator
+
+Usage:
+  node src/index.js <youtube_url> [start_time] [end_time]
+  node src/index.js scrape-memes
+  node src/index.js test
+  node src/index.js cleanup
+
+Examples:
+  node src/index.js "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+  node src/index.js "https://www.youtube.com/watch?v=dQw4w9WgXcQ" "00:30" "01:15"
+  node src/index.js scrape-memes
+  node src/index.js test
+
+Environment Variables Required:
+  OPENAI_API_KEY - OpenAI API key for keyword extraction
+  LEMONFOX_API_KEY - LemonFox.ia API key for transcription (optional)
+  MEME_SITE_URL - URL for meme scraping (optional)
+        `);
+        process.exit(0);
+    }
+
+    try {
+        const command = args[0];
+
+        switch (command) {
+            case 'scrape-memes':
+                await generator.scrapeMemes();
+                break;
+
+            case 'test':
+                await generator.test();
+                break;
+
+            case 'cleanup':
+                await generator.cleanup();
+                break;
+
+            default:
+                // Assume it's a YouTube URL
+                const youtubeUrl = command;
+                const startTime = args[1] || null;
+                const endTime = args[2] || null;
+
+                const outputPath = await generator.generateVideo(youtubeUrl, {
+                    startTime,
+                    endTime
+                });
+
+                console.log(`\n🎉 Video generated successfully!`);
+                console.log(`📁 Output: ${outputPath}\n`);
+                break;
+        }
+
+    } catch (error) {
+        Logger.error('❌ Command failed:', error);
+        process.exit(1);
+    }
+}
+
+// Export for programmatic use
+module.exports = MemeVideoGenerator;
+
+// Run CLI if called directly
+if (require.main === module) {
+    main();
+} 
