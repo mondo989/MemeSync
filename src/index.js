@@ -74,13 +74,13 @@ class MemeVideoGenerator {
                 Logger.info(`  ${index + 1}. "${item.keyword}" from: "${item.text}"`);
             });
 
-            // Step 5: Search for memes dynamically using Puppeteer
+                        // Step 5: Search for memes dynamically using Puppeteer
             Logger.info('🎭 Step 4/6: Searching for memes...');
             const keywords = keywordData.map(item => item.keyword);
             const memeResults = await this.puppeteerScraper.searchMemesForKeywords(keywords);
-            
-            Logger.success(`🎭 Meme search completed! Found memes for ${memeResults.length} keywords`);
 
+            Logger.success(`🎭 Meme search completed! Found memes for ${memeResults.length} keywords`);
+            
             // Combine keyword data with meme results
             const matchedMemes = keywordData.map((item, index) => {
                 const memeResult = memeResults.find(result => result.keyword === item.keyword);
@@ -95,24 +95,44 @@ class MemeVideoGenerator {
                     }
                 };
             });
+
+            // 🛑 CHECKPOINT: Show collected memes before proceeding to slide rendering
+            Logger.success('\n🎉 MEME COLLECTION CHECKPOINT COMPLETE!');
+            Logger.info('📋 Successfully collected memes for all keywords:');
+            Logger.info('═'.repeat(80));
             
-            // Step 6: Render slides
-            Logger.info('🖼️  Step 5/6: Rendering slides...');
-            const slides = await this.slideRenderer.renderSlides(matchedMemes, thumbnailMemeUrl);
-
-            // Step 7: Create final video
-            Logger.info('🎥 Step 6/6: Creating final video...');
-            const outputPath = await this.videoRenderer.createVideo(slides, audioPath);
-
-            // Get video info
-            const videoInfo = await this.videoRenderer.getVideoInfo(outputPath);
+            matchedMemes.forEach((item, index) => {
+                Logger.info(`\n${index + 1}. 🎭 Keyword: "${item.keyword}"`);
+                Logger.info(`   📝 From text: "${item.text}"`);
+                Logger.info(`   🖼️  Meme URL: ${item.meme.url}`);
+                Logger.info(`   ⏰ Timing: ${item.start.toFixed(1)}s - ${item.end.toFixed(1)}s`);
+            });
             
-            Logger.success('🎉 Meme video generation completed!');
-            Logger.success(`📁 Output: ${outputPath}`);
-            Logger.success(`⏱️  Duration: ${Math.round(videoInfo.duration)}s`);
-            Logger.success(`📊 Size: ${Math.round(videoInfo.size / 1024 / 1024)}MB`);
+            Logger.info('\n═'.repeat(80));
+            Logger.success(`✅ Checkpoint complete: ${matchedMemes.length} memes collected and ready for slide rendering`);
+            Logger.info('🚧 Stopping here for checkpoint verification. Slide rendering disabled.');
+            
+            // Return a checkpoint summary instead of continuing to slide rendering
+            return `checkpoint-complete-${matchedMemes.length}-memes-collected.json`;
 
-            return outputPath;
+            // TODO: Uncomment these steps once meme collection is verified
+            // // Step 6: Render slides
+            // Logger.info('🖼️  Step 5/6: Rendering slides...');
+            // const slides = await this.slideRenderer.renderSlides(matchedMemes, thumbnailMemeUrl);
+
+            // // Step 7: Create final video
+            // Logger.info('🎥 Step 6/6: Creating final video...');
+            // const outputPath = await this.videoRenderer.createVideo(slides, audioPath);
+
+            // // Get video info
+            // const videoInfo = await this.videoRenderer.getVideoInfo(outputPath);
+            
+            // Logger.success('🎉 Meme video generation completed!');
+            // Logger.success(`📁 Output: ${outputPath}`);
+            // Logger.success(`⏱️  Duration: ${Math.round(videoInfo.duration)}s`);
+            // Logger.success(`📊 Size: ${Math.round(videoInfo.size / 1024 / 1024)}MB`);
+
+            // return outputPath;
 
         } catch (error) {
             Logger.error('❌ Video generation failed:', error);

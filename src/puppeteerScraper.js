@@ -24,25 +24,50 @@ class PuppeteerScraper {
         Logger.debug(`Meme site URL: ${this.memesSiteUrl}`);
         
         let browser = null;
-        try {
-            Logger.info('🚀 Launching Puppeteer browser...');
-            browser = await puppeteer.launch({
-                headless: 'new', // Changed back to headless for production
+        Logger.info('🚀 Launching Puppeteer browser...');
+        
+        // Try multiple launch configurations for macOS stability
+        const launchConfigs = [
+            // Use system Chrome (most stable)
+            {
+                headless: false,
+                executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
                 args: [
-                    '--no-sandbox', 
-                    '--disable-setuid-sandbox', 
+                    '--no-sandbox',
+                    '--disable-setuid-sandbox',
                     '--disable-dev-shm-usage',
-                    '--disable-accelerated-2d-canvas',
-                    '--no-first-run',
-                    '--no-zygote',
                     '--disable-gpu'
                 ],
-                timeout: 30000
-            });
-            Logger.success('✅ Browser launched successfully');
-        } catch (launchError) {
-            Logger.error('❌ Failed to launch browser:', launchError.message);
-            throw new Error(`Browser launch failed: ${launchError.message}`);
+                timeout: 10000
+            },
+            // Fallback to Puppeteer's Chrome
+            {
+                headless: false,
+                args: ['--no-sandbox', '--disable-setuid-sandbox'],
+                timeout: 10000
+            }
+        ];
+
+        let lastError = null;
+        for (let i = 0; i < launchConfigs.length; i++) {
+            try {
+                Logger.info(`🔄 Trying browser config ${i + 1}/${launchConfigs.length}...`);
+                browser = await puppeteer.launch(launchConfigs[i]);
+                Logger.success('✅ Browser launched successfully');
+                break;
+            } catch (configError) {
+                lastError = configError;
+                Logger.warn(`⚠️ Config ${i + 1} failed: ${configError.message}`);
+                if (browser) {
+                    try { await browser.close(); } catch {}
+                    browser = null;
+                }
+            }
+        }
+
+        if (!browser) {
+            Logger.error('❌ All browser launch configurations failed');
+            throw new Error(`Browser launch failed: ${lastError?.message || 'Unknown error'}`);
         }
 
         const results = [];
@@ -64,10 +89,36 @@ class PuppeteerScraper {
                 Logger.warn('⚠️  Page JS error:', error.message);
             });
             
-            // Navigate to memes site with enhanced logging
+            // Give browser time to fully initialize
+            await page.waitForTimeout(1000);
+            
+            // Navigate to memes site with retry logic
             Logger.info(`🌐 Navigating to: ${this.memesSiteUrl}`);
-            await page.goto(this.memesSiteUrl, { waitUntil: 'networkidle2', timeout: 15000 });
-            Logger.success('✅ Page loaded successfully');
+            let navigationSuccess = false;
+            const maxRetries = 3;
+            
+            for (let retry = 1; retry <= maxRetries; retry++) {
+                try {
+                    Logger.debug(`📡 Navigation attempt ${retry}/${maxRetries}...`);
+                    await page.goto(this.memesSiteUrl, { 
+                        waitUntil: 'domcontentloaded', // Less strict than networkidle2
+                        timeout: 10000 
+                    });
+                    navigationSuccess = true;
+                    Logger.success('✅ Page loaded successfully');
+                    break;
+                } catch (navError) {
+                    Logger.warn(`⚠️ Navigation attempt ${retry} failed: ${navError.message}`);
+                    if (retry < maxRetries) {
+                        Logger.debug('⏳ Waiting 2 seconds before retry...');
+                        await page.waitForTimeout(2000);
+                    }
+                }
+            }
+            
+            if (!navigationSuccess) {
+                throw new Error('Failed to navigate to memes site after multiple retries');
+            }
             
             Logger.info(`🔍 Starting search for ${keywords.length} keywords...`);
             
@@ -197,8 +248,14 @@ class PuppeteerScraper {
         Logger.info(`Starting meme scraping from: ${this.memesSiteUrl}`);
         
         const browser = await puppeteer.launch({
-            headless: 'new',
-            args: ['--no-sandbox', '--disable-setuid-sandbox']
+            headless: false,
+            executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+            args: [
+                '--no-sandbox', 
+                '--disable-setuid-sandbox',
+                '--disable-gpu',
+                '--disable-dev-shm-usage'
+            ]
         });
 
         try {

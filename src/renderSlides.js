@@ -43,20 +43,19 @@ class SlideRenderer {
                 Logger.info(`Launching browser (attempt ${attempt}/${maxRetries})`);
                 
                 browser = await puppeteer.launch({
-                    headless: 'new',
+                    headless: false, // Use visible browser for debugging
+                    executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
                     args: [
                         '--no-sandbox', 
                         '--disable-setuid-sandbox',
                         '--disable-dev-shm-usage',
-                        '--disable-gpu',
-                        '--single-process',
-                        '--disable-web-security'
+                        '--disable-gpu'
                     ],
                     defaultViewport: {
                         width: 1280,
                         height: 720
                     },
-                    timeout: 15000
+                    timeout: 10000
                 });
                 
                 Logger.info('Browser launched successfully');

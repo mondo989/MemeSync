@@ -208,13 +208,15 @@ async function generateVideoAsync(jobId, youtubeUrl, options) {
                 originalInfo(message, data);
                 
                 // Update progress based on message content  
-                if (message.includes('Step 1/6')) updateJob('running', 15, 'Downloading audio...');
-                else if (message.includes('Step 2/6')) updateJob('running', 30, 'Generating transcript...');
-                else if (message.includes('Step 3/6')) updateJob('running', 45, 'Extracting keywords...');
-                else if (message.includes('Step 4/6')) updateJob('running', 60, 'Searching for memes...');
-                else if (message.includes('Step 5/6')) updateJob('running', 75, 'Rendering slides...');
-                else if (message.includes('Step 6/6')) updateJob('running', 90, 'Creating final video...');
-                else if (message.includes('Meme search completed')) updateJob('running', 65, 'Memes found! Creating slides...');
+                                    if (message.includes('Step 1/6')) updateJob('running', 15, 'Downloading audio...');
+                    else if (message.includes('Step 2/6')) updateJob('running', 30, 'Generating transcript...');
+                    else if (message.includes('Step 3/6')) updateJob('running', 45, 'Extracting keywords...');
+                    else if (message.includes('Step 4/6')) updateJob('running', 60, 'Searching for memes...');
+                    else if (message.includes('Meme search completed')) updateJob('running', 80, 'Memes collected! Preparing checkpoint...');
+                    else if (message.includes('MEME COLLECTION CHECKPOINT COMPLETE')) updateJob('running', 95, 'Checkpoint complete! Memes ready for rendering.');
+                    // Temporarily disabled slide rendering steps
+                    // else if (message.includes('Step 5/6')) updateJob('running', 75, 'Rendering slides...');
+                    // else if (message.includes('Step 6/6')) updateJob('running', 90, 'Creating final video...');
                 else if (message.includes('Downloading audio')) updateJob('running', 10, 'Downloading audio...');
                 else if (message.includes('Fetching video')) updateJob('running', 8, 'Fetching video info...');
             } catch (err) {
