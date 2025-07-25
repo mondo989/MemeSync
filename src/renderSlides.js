@@ -35,10 +35,41 @@ class SlideRenderer {
         
         Logger.info(`Rendering ${matchedMemes.length} slides...`);
         
-        const browser = await puppeteer.launch({
-            headless: 'new',
-            args: ['--no-sandbox', '--disable-setuid-sandbox']
-        });
+        let browser;
+        const maxRetries = 3;
+        
+        for (let attempt = 1; attempt <= maxRetries; attempt++) {
+            try {
+                Logger.info(`Launching browser (attempt ${attempt}/${maxRetries})`);
+                
+                browser = await puppeteer.launch({
+                    headless: 'new',
+                    args: [
+                        '--no-sandbox', 
+                        '--disable-setuid-sandbox',
+                        '--disable-dev-shm-usage',
+                        '--disable-gpu',
+                        '--single-process',
+                        '--disable-web-security'
+                    ],
+                    defaultViewport: {
+                        width: 1280,
+                        height: 720
+                    },
+                    timeout: 15000
+                });
+                
+                Logger.info('Browser launched successfully');
+                break;
+                
+            } catch (error) {
+                Logger.warn(`Browser launch attempt ${attempt} failed:`, error.message);
+                if (attempt === maxRetries) {
+                    throw new Error(`Failed to launch browser after ${maxRetries} attempts`);
+                }
+                await new Promise(resolve => setTimeout(resolve, 2000)); // Wait 2s before retry
+            }
+        }
 
         try {
             const slides = [];
@@ -85,7 +116,11 @@ class SlideRenderer {
             Logger.error('Failed to render slides:', error);
             throw error;
         } finally {
-            await browser.close();
+            try {
+                await browser.close();
+            } catch (closeError) {
+                Logger.warn('Error closing browser:', closeError.message);
+            }
         }
     }
 

@@ -62,27 +62,24 @@ class MemeVideoGenerator {
             Logger.info('🔍 Step 3/6: Extracting keywords...');
             const keywordData = await this.keywordExtractor.extractKeywords(transcript);
 
-            // Step 5: Match keywords to memes
-            Logger.info('🎭 Step 4/6: Matching memes...');
-            const matchedMemes = await this.memesMatcher.matchMemes(keywordData);
+            // Log the extracted lyrics for review
+            Logger.success('📝 Lyrics extraction completed!');
+            Logger.info('Extracted lyrics segments:');
+            transcript.forEach((segment, index) => {
+                Logger.info(`  ${index + 1}. [${segment.start.toFixed(1)}s-${segment.end.toFixed(1)}s] "${segment.text}"`);
+            });
 
-            // Step 6: Render slides
-            Logger.info('🖼️  Step 5/6: Rendering slides...');
-            const slides = await this.slideRenderer.renderSlides(matchedMemes, thumbnailMemeUrl);
+            Logger.info('\nExtracted keywords:');
+            keywordData.forEach((item, index) => {
+                Logger.info(`  ${index + 1}. "${item.keyword}" from: "${item.text}"`);
+            });
 
-            // Step 7: Create final video
-            Logger.info('🎥 Step 6/6: Creating final video...');
-            const outputPath = await this.videoRenderer.createVideo(slides, audioPath);
-
-            // Get video info
-            const videoInfo = await this.videoRenderer.getVideoInfo(outputPath);
+            // TODO: Add meme matching and video generation here once lyrics extraction is perfected
+            Logger.info('\n🎉 Lyrics extraction completed successfully!');
+            Logger.info('Ready for meme matching and video generation (coming next)...');
             
-            Logger.success('🎉 Meme video generation completed!');
-            Logger.success(`📁 Output: ${outputPath}`);
-            Logger.success(`⏱️  Duration: ${Math.round(videoInfo.duration)}s`);
-            Logger.success(`📊 Size: ${Math.round(videoInfo.size / 1024 / 1024)}MB`);
-
-            return outputPath;
+            // For now, return a placeholder path
+            return 'lyrics-extracted-successfully.txt';
 
         } catch (error) {
             Logger.error('❌ Video generation failed:', error);

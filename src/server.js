@@ -19,6 +19,25 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 const generator = new MemeVideoGenerator();
 
+// Development logging middleware
+if (process.env.NODE_ENV === 'development') {
+    app.use((req, res, next) => {
+        const start = Date.now();
+        const { method, url, ip } = req;
+        
+        Logger.debug(`🌐 ${method} ${url} from ${ip}`);
+        
+        res.on('finish', () => {
+            const duration = Date.now() - start;
+            const { statusCode } = res;
+            const statusEmoji = statusCode >= 400 ? '❌' : statusCode >= 300 ? '⚠️' : '✅';
+            Logger.debug(`${statusEmoji} ${method} ${url} - ${statusCode} (${duration}ms)`);
+        });
+        
+        next();
+    });
+}
+
 // Middleware
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
@@ -38,7 +57,15 @@ app.get('/', (req, res) => {
 app.post('/api/generate', async (req, res) => {
     const { youtubeUrl, startTime, endTime, thumbnailMemeUrl } = req.body;
     
+    Logger.info('🎬 New video generation request:', {
+        youtubeUrl: youtubeUrl?.substring(0, 50) + '...',
+        startTime,
+        endTime,
+        ip: req.ip
+    });
+    
     if (!youtubeUrl) {
+        Logger.warn('❌ Generation request missing YouTube URL');
         return res.status(400).json({ error: 'YouTube URL is required' });
     }
 
@@ -51,6 +78,8 @@ app.post('/api/generate', async (req, res) => {
         message: 'Initializing...',
         startTime: new Date()
     });
+
+    Logger.info(`✅ Job ${jobId} created and queued for processing`);
 
     // Start generation in background
     generateVideoAsync(jobId, youtubeUrl, { startTime, endTime, thumbnailMemeUrl });
@@ -106,22 +135,31 @@ app.get('/api/download/:filename', (req, res) => {
     const { filename } = req.params;
     const filePath = path.join(__dirname, '../media', filename);
     
+    Logger.info(`📥 Download requested: ${filename} from ${req.ip}`);
+    
     res.download(filePath, (err) => {
         if (err) {
-            Logger.error('Download failed:', err);
+            Logger.error(`❌ Download failed for ${filename}:`, err.message);
             res.status(404).json({ error: 'File not found' });
+        } else {
+            Logger.success(`✅ Download completed: ${filename}`);
         }
     });
 });
 
 // Cleanup endpoint
 app.post('/api/cleanup', async (req, res) => {
+    Logger.info(`🧹 Cleanup requested from ${req.ip}`);
+    
     try {
         await generator.cleanup();
+        const activeJobCount = activeJobs.size;
         activeJobs.clear();
+        
+        Logger.success(`✅ Cleanup completed - cleared ${activeJobCount} active jobs`);
         res.json({ message: 'Cleanup completed' });
     } catch (error) {
-        Logger.error('Cleanup failed:', error);
+        Logger.error('❌ Cleanup failed:', error);
         res.status(500).json({ error: 'Cleanup failed' });
     }
 });
@@ -169,15 +207,13 @@ async function generateVideoAsync(jobId, youtubeUrl, options) {
             try {
                 originalInfo(message, data);
                 
-                // Update progress based on message content
-                if (message.includes('Step 1/6')) updateJob('running', 20, 'Downloading audio...');
-                else if (message.includes('Step 2/6')) updateJob('running', 35, 'Generating transcript...');
-                else if (message.includes('Step 3/6')) updateJob('running', 50, 'Extracting keywords...');
-                else if (message.includes('Step 4/6')) updateJob('running', 65, 'Matching memes...');
-                else if (message.includes('Step 5/6')) updateJob('running', 80, 'Rendering slides...');
-                else if (message.includes('Step 6/6')) updateJob('running', 90, 'Creating final video...');
-                else if (message.includes('Downloading audio')) updateJob('running', 15, 'Downloading audio...');
-                else if (message.includes('Fetching video')) updateJob('running', 12, 'Fetching video info...');
+                // Update progress based on message content  
+                if (message.includes('Step 1/6')) updateJob('running', 30, 'Downloading audio...');
+                else if (message.includes('Step 2/6')) updateJob('running', 60, 'Generating transcript...');
+                else if (message.includes('Step 3/6')) updateJob('running', 90, 'Extracting keywords...');
+                else if (message.includes('Lyrics extraction completed')) updateJob('running', 100, 'Lyrics extraction completed!');
+                else if (message.includes('Downloading audio')) updateJob('running', 20, 'Downloading audio...');
+                else if (message.includes('Fetching video')) updateJob('running', 15, 'Fetching video info...');
             } catch (err) {
                 originalInfo(message, data);
             }
@@ -227,11 +263,30 @@ async function generateVideoAsync(jobId, youtubeUrl, options) {
 }
 
 app.listen(PORT, () => {
-    Logger.success(`🌐 Meme Sync web server running on http://localhost:${PORT}`);
-    Logger.info('📝 Environment variables:');
+    console.log('\n' + '='.repeat(60));
+    Logger.success(`🎬 MEME SYNC SERVER STARTED`);
+    console.log('='.repeat(60));
+    Logger.success(`🌐 Server running at: http://localhost:${PORT}`);
+    Logger.info(`🔧 Environment: ${process.env.NODE_ENV || 'development'}`);
+    Logger.info(`📁 Serving static files from: ${path.join(__dirname, '../public')}`);
+    Logger.info(`📦 Media directory: ${path.join(__dirname, '../media')}`);
+    
+    console.log('\n📋 API Endpoints:');
+    Logger.info('   🏠 GET  /                    - Web interface');
+    Logger.info('   🎬 POST /api/generate        - Start video generation');
+    Logger.info('   📊 GET  /api/status/:jobId   - Check job status');
+    Logger.info('   📡 GET  /api/stream/:jobId   - Real-time updates');
+    Logger.info('   📥 GET  /api/download/:file  - Download generated video');
+    Logger.info('   🧹 POST /api/cleanup         - Clean up temporary files');
+    Logger.info('   ❤️  GET  /api/health         - Health check');
+    
+    console.log('\n🔑 Configuration:');
     Logger.info(`   OpenAI API: ${process.env.OPENAI_API_KEY ? '✅ Configured' : '❌ Missing'}`);
     Logger.info(`   LemonFox API: ${process.env.LEMONFOX_API_KEY ? '✅ Configured' : '❌ Missing (using fallback)'}`);
     Logger.info(`   Meme Site URL: ${process.env.MEME_SITE_URL || '❌ Not configured (using defaults)'}`);
+    
+    console.log('\n🚀 Ready to generate meme videos!');
+    console.log('='.repeat(60) + '\n');
 });
 
 module.exports = app; 

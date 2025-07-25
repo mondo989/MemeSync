@@ -6,7 +6,7 @@ const Logger = require('./utils/logger');
 class TranscriptionService {
     constructor() {
         this.lemonFoxApiKey = process.env.LEMONFOX_API_KEY;
-        this.lemonFoxApiUrl = process.env.LEMONFOX_API_URL || 'https://api.lemonfox.ia';
+        this.lemonFoxApiUrl = process.env.LEMONFOX_API_URL || 'https://api.lemonfox.ai';
     }
 
     /**
@@ -19,57 +19,65 @@ class TranscriptionService {
     async getTranscript(youtubeUrl, startTime = null, endTime = null) {
         Logger.info('Starting transcription process...');
 
-        try {
-            // Try LemonFox.ia first if API key is available
-            if (this.lemonFoxApiKey) {
-                return await this.transcribeWithLemonFox(youtubeUrl, startTime, endTime);
-            } else {
-                Logger.warn('LemonFox API key not found, using fallback method');
-                return await this.transcribeWithFallback(youtubeUrl, startTime, endTime);
-            }
-        } catch (error) {
-            Logger.error('Transcription failed:', error);
-            // Try fallback method if main method fails
-            return await this.transcribeWithFallback(youtubeUrl, startTime, endTime);
+        if (!this.lemonFoxApiKey) {
+            throw new Error('LemonFox API key is required for transcription');
         }
+
+        return await this.transcribeWithLemonFox(youtubeUrl, startTime, endTime);
     }
 
     /**
-     * Transcribe using LemonFox.ia API
+     * Transcribe using LemonFox.ai API
      * @param {string} youtubeUrl - YouTube video URL
      * @param {string} startTime - Start time
      * @param {string} endTime - End time
      * @returns {Array} - Transcript with timestamps
      */
     async transcribeWithLemonFox(youtubeUrl, startTime, endTime) {
-        Logger.info('Using LemonFox.ia for transcription...');
+        Logger.info('Using LemonFox.ai for transcription...');
 
         try {
-            // Submit transcription job
-            const submitResponse = await axios.post(`${this.lemonFoxApiUrl}/transcribe`, {
-                url: youtubeUrl,
-                format: 'youtube',
-                timestamps: true,
-                language: 'auto'
-            }, {
+            // LemonFox needs actual audio file, not YouTube URL
+            // Look for the downloaded audio file
+            const audioPath = path.join(process.cwd(), 'media/audio.m4a');
+            
+            try {
+                await fs.access(audioPath);
+                Logger.info('Found downloaded audio file for transcription');
+            } catch {
+                throw new Error('Audio file not found. Download audio first before transcription.');
+            }
+
+            // Create form data for LemonFox API  
+            const FormData = require('form-data');
+            const fs_sync = require('fs');
+            const formData = new FormData();
+            
+            // Upload the actual audio file
+            formData.append('file', fs_sync.createReadStream(audioPath));
+            formData.append('response_format', 'verbose_json');
+            formData.append('language', 'english');
+            formData.append('timestamp_granularities[]', 'word');
+
+            // Submit transcription request
+            const response = await axios.post(`${this.lemonFoxApiUrl}/v1/audio/transcriptions`, formData, {
                 headers: {
                     'Authorization': `Bearer ${this.lemonFoxApiKey}`,
-                    'Content-Type': 'application/json'
-                }
+                    ...formData.getHeaders()
+                },
+                timeout: 120000 // 2 minute timeout for file upload
             });
 
-            const jobId = submitResponse.data.job_id;
-            Logger.info(`Transcription job submitted: ${jobId}`);
-
-            // Poll for completion
-            let transcript = await this.pollTranscriptionJob(jobId);
+            Logger.info('LemonFox transcription completed');
+            Logger.info('Raw LemonFox response:', JSON.stringify(response.data, null, 2));
+            let transcript = this.parseLemonFoxResponse(response.data);
             
             // Filter by time range if specified
             if (startTime && endTime) {
                 transcript = this.filterTranscriptByTime(transcript, startTime, endTime);
             }
 
-            Logger.success(`Transcription completed: ${transcript.length} segments`);
+            Logger.success(`Transcription completed: ${transcript.length} segments for time range ${startTime}-${endTime}`);
             return transcript;
 
         } catch (error) {
@@ -98,7 +106,7 @@ class TranscriptionService {
                 const { status, result } = response.data;
 
                 if (status === 'completed') {
-                    return this.parseLemonFoxTranscript(result);
+                    return this.parseLemonFoxResponse(result);
                 } else if (status === 'failed') {
                     throw new Error('Transcription job failed');
                 }
@@ -122,67 +130,77 @@ class TranscriptionService {
      * @param {Object} result - LemonFox result object
      * @returns {Array} - Standardized transcript format
      */
-    parseLemonFoxTranscript(result) {
-        // Adapt this based on actual LemonFox.ia response format
+    parseLemonFoxResponse(result) {
+        Logger.info('Parsing LemonFox response...');
+        
+        // LemonFox verbose_json format
         if (result.segments) {
             return result.segments.map(segment => ({
                 start: segment.start,
                 end: segment.end,
                 text: segment.text.trim()
-            }));
-        }
-        
-        // Fallback parsing
-        if (result.transcript && result.timestamps) {
-            const lines = result.transcript.split('\n');
-            const timestamps = result.timestamps;
-            
-            return lines.map((text, index) => ({
-                start: timestamps[index]?.start || index * 3,
-                end: timestamps[index]?.end || (index + 1) * 3,
-                text: text.trim()
             })).filter(item => item.text.length > 0);
         }
-
-        throw new Error('Unknown LemonFox transcript format');
-    }
-
-    /**
-     * Fallback transcription method (mock implementation)
-     * In a real implementation, this could use:
-     * - YouTube's auto-generated captions
-     * - Local speech recognition
-     * - Alternative APIs
-     * @param {string} youtubeUrl - YouTube video URL
-     * @param {string} startTime - Start time
-     * @param {string} endTime - End time
-     * @returns {Array} - Mock transcript
-     */
-    async transcribeWithFallback(youtubeUrl, startTime, endTime) {
-        Logger.warn('Using fallback transcription (mock data)');
         
-        // Mock transcript for development/testing
-        const mockTranscript = [
-            { start: 0, end: 3, text: "Welcome to this amazing song" },
-            { start: 3, end: 6, text: "Feel the rhythm in your soul" },
-            { start: 6, end: 9, text: "Dancing through the night" },
-            { start: 9, end: 12, text: "Everything will be alright" },
-            { start: 12, end: 15, text: "Love is in the air tonight" },
-            { start: 15, end: 18, text: "Stars are shining bright" },
-            { start: 18, end: 21, text: "Never gonna give you up" },
-            { start: 21, end: 24, text: "Never gonna let you down" },
-            { start: 24, end: 27, text: "Running around and desert you" },
-            { start: 27, end: 30, text: "Never gonna make you cry" }
-        ];
-
-        // Filter by time range if specified
-        if (startTime && endTime) {
-            return this.filterTranscriptByTime(mockTranscript, startTime, endTime);
+        // Alternative format - simple text with word-level timestamps
+        if (result.words) {
+            // Group words into phrases (every ~3 seconds)
+            const segments = [];
+            let currentSegment = { start: 0, end: 0, text: '' };
+            const maxDuration = 3; // 3 seconds per segment
+            
+            result.words.forEach(word => {
+                if (word.end - currentSegment.start > maxDuration && currentSegment.text.trim()) {
+                    segments.push({
+                        start: currentSegment.start,
+                        end: currentSegment.end,
+                        text: currentSegment.text.trim()
+                    });
+                    currentSegment = { start: word.start, end: word.end, text: word.word };
+                } else {
+                    if (!currentSegment.text) currentSegment.start = word.start;
+                    currentSegment.end = word.end;
+                    currentSegment.text += ' ' + word.word;
+                }
+            });
+            
+            // Add the last segment
+            if (currentSegment.text.trim()) {
+                segments.push({
+                    start: currentSegment.start,
+                    end: currentSegment.end,
+                    text: currentSegment.text.trim()
+                });
+            }
+            
+            return segments;
         }
 
-        Logger.info('Fallback transcription completed');
-        return mockTranscript;
+        // Simple text format - create timed segments
+        if (result.text) {
+            const words = result.text.split(' ');
+            const segments = [];
+            const wordsPerSegment = 8; // ~3 seconds worth
+            
+            for (let i = 0; i < words.length; i += wordsPerSegment) {
+                const segmentWords = words.slice(i, i + wordsPerSegment);
+                const start = (i / wordsPerSegment) * 3;
+                const end = start + 3;
+                
+                segments.push({
+                    start: start,
+                    end: end,
+                    text: segmentWords.join(' ')
+                });
+            }
+            
+            return segments;
+        }
+
+        throw new Error('Unknown LemonFox response format');
     }
+
+
 
     /**
      * Filter transcript by time range
@@ -195,13 +213,27 @@ class TranscriptionService {
         const startSeconds = this.timeToSeconds(startTime);
         const endSeconds = this.timeToSeconds(endTime);
 
-        return transcript
-            .filter(segment => segment.start >= startSeconds && segment.end <= endSeconds)
+        Logger.info(`Filtering transcript: ${startSeconds}s to ${endSeconds}s from ${transcript.length} segments`);
+
+        // Filter segments that overlap with our time range
+        const filtered = transcript
+            .filter(segment => {
+                // Include segment if it overlaps with our time range
+                const segmentOverlaps = segment.start < endSeconds && segment.end > startSeconds;
+                if (segmentOverlaps) {
+                    Logger.debug(`Including segment: ${segment.start}-${segment.end}s: "${segment.text}"`);
+                }
+                return segmentOverlaps;
+            })
             .map(segment => ({
                 ...segment,
-                start: segment.start - startSeconds,
+                // Adjust timestamps to start from 0
+                start: Math.max(0, segment.start - startSeconds),
                 end: segment.end - startSeconds
             }));
+
+        Logger.info(`Filtered transcript: ${filtered.length} segments in time range`);
+        return filtered;
     }
 
     /**
