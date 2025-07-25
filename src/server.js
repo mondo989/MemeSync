@@ -208,12 +208,15 @@ async function generateVideoAsync(jobId, youtubeUrl, options) {
                 originalInfo(message, data);
                 
                 // Update progress based on message content  
-                if (message.includes('Step 1/6')) updateJob('running', 30, 'Downloading audio...');
-                else if (message.includes('Step 2/6')) updateJob('running', 60, 'Generating transcript...');
-                else if (message.includes('Step 3/6')) updateJob('running', 90, 'Extracting keywords...');
-                else if (message.includes('Lyrics extraction completed')) updateJob('running', 100, 'Lyrics extraction completed!');
-                else if (message.includes('Downloading audio')) updateJob('running', 20, 'Downloading audio...');
-                else if (message.includes('Fetching video')) updateJob('running', 15, 'Fetching video info...');
+                if (message.includes('Step 1/6')) updateJob('running', 15, 'Downloading audio...');
+                else if (message.includes('Step 2/6')) updateJob('running', 30, 'Generating transcript...');
+                else if (message.includes('Step 3/6')) updateJob('running', 45, 'Extracting keywords...');
+                else if (message.includes('Step 4/6')) updateJob('running', 60, 'Searching for memes...');
+                else if (message.includes('Step 5/6')) updateJob('running', 75, 'Rendering slides...');
+                else if (message.includes('Step 6/6')) updateJob('running', 90, 'Creating final video...');
+                else if (message.includes('Meme search completed')) updateJob('running', 65, 'Memes found! Creating slides...');
+                else if (message.includes('Downloading audio')) updateJob('running', 10, 'Downloading audio...');
+                else if (message.includes('Fetching video')) updateJob('running', 8, 'Fetching video info...');
             } catch (err) {
                 originalInfo(message, data);
             }

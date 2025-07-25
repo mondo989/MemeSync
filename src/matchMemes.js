@@ -7,10 +7,6 @@ class MemesMatcher {
     constructor() {
         this.memesPath = path.join(__dirname, '../memes.json');
         this.memes = [];
-        this.fallbackMeme = {
-            keywords: ['default'],
-            url: process.env.FALLBACK_MEME_URL || 'https://i.imgflip.com/30b1gx.jpg'
-        };
     }
 
     /**
@@ -22,8 +18,8 @@ class MemesMatcher {
             this.memes = JSON.parse(data);
             Logger.info(`Loaded ${this.memes.length} memes from database`);
         } catch (error) {
-            Logger.warn('Failed to load memes.json, using fallback memes only');
-            this.memes = this.getDefaultMemes();
+            Logger.error('Failed to load memes.json:', error.message);
+            throw new Error('Cannot proceed without memes database');
         }
     }
 
@@ -58,8 +54,8 @@ class MemesMatcher {
      * @returns {Object} - Meme object {keywords, url}
      */
     findBestMeme(keyword) {
-        if (!keyword || keyword === 'default') {
-            return this.fallbackMeme;
+        if (!keyword) {
+            throw new Error('Keyword is required for meme matching');
         }
 
         let bestMatch = null;
@@ -81,7 +77,11 @@ class MemesMatcher {
             bestMatch = this.fuzzyMatch(keyword);
         }
 
-        return bestMatch || this.fallbackMeme;
+        if (!bestMatch) {
+            throw new Error(`No meme found for keyword: ${keyword}`);
+        }
+
+        return bestMatch;
     }
 
     /**
@@ -198,54 +198,7 @@ class MemesMatcher {
         return null;
     }
 
-    /**
-     * Get default memes for common cases
-     * @returns {Array} - Array of default meme objects
-     */
-    getDefaultMemes() {
-        return [
-            {
-                keywords: ['default', 'error', 'unknown', 'fallback'],
-                url: 'https://i.imgflip.com/30b1gx.jpg' // "This is Fine"
-            },
-            {
-                keywords: ['happy', 'joy', 'celebration', 'party', 'excited', 'fun'],
-                url: 'https://i.imgflip.com/1g8my4.jpg' // Drake pointing
-            },
-            {
-                keywords: ['sad', 'cry', 'depression', 'lonely', 'down'],
-                url: 'https://i.imgflip.com/1biioo.jpg' // Sad Pablo Escobar
-            },
-            {
-                keywords: ['confused', 'what', 'lost', 'puzzled', 'help'],
-                url: 'https://i.imgflip.com/2zo1ki.jpg' // Confused Jackie Chan
-            },
-            {
-                keywords: ['angry', 'mad', 'rage', 'furious', 'upset'],
-                url: 'https://i.imgflip.com/1o00in.jpg' // Angry Baby
-            },
-            {
-                keywords: ['love', 'heart', 'romantic', 'valentine', 'cute'],
-                url: 'https://i.imgflip.com/26jxvz.jpg' // Wholesome meme
-            },
-            {
-                keywords: ['dance', 'music', 'party', 'move', 'groove'],
-                url: 'https://i.imgflip.com/1rbojb.jpg' // Dancing baby
-            },
-            {
-                keywords: ['fire', 'hot', 'burn', 'flame', 'heat'],
-                url: 'https://i.imgflip.com/2fm6x.jpg' // "Everything is fine" fire
-            },
-            {
-                keywords: ['money', 'rich', 'cash', 'dollar', 'wealth'],
-                url: 'https://i.imgflip.com/1c1uej.jpg' // Money meme
-            },
-            {
-                keywords: ['fast', 'speed', 'run', 'quick', 'rush'],
-                url: 'https://i.imgflip.com/1ihzfe.jpg' // Speed meme
-            }
-        ];
-    }
+
 
     /**
      * Get meme statistics

@@ -74,12 +74,45 @@ class MemeVideoGenerator {
                 Logger.info(`  ${index + 1}. "${item.keyword}" from: "${item.text}"`);
             });
 
-            // TODO: Add meme matching and video generation here once lyrics extraction is perfected
-            Logger.info('\n🎉 Lyrics extraction completed successfully!');
-            Logger.info('Ready for meme matching and video generation (coming next)...');
+            // Step 5: Search for memes dynamically using Puppeteer
+            Logger.info('🎭 Step 4/6: Searching for memes...');
+            const keywords = keywordData.map(item => item.keyword);
+            const memeResults = await this.puppeteerScraper.searchMemesForKeywords(keywords);
             
-            // For now, return a placeholder path
-            return 'lyrics-extracted-successfully.txt';
+            Logger.success(`🎭 Meme search completed! Found memes for ${memeResults.length} keywords`);
+
+            // Combine keyword data with meme results
+            const matchedMemes = keywordData.map((item, index) => {
+                const memeResult = memeResults.find(result => result.keyword === item.keyword);
+                if (!memeResult) {
+                    throw new Error(`No meme found for keyword: ${item.keyword}`);
+                }
+                return {
+                    ...item,
+                    meme: {
+                        url: memeResult.memeUrl,
+                        keywords: [item.keyword]
+                    }
+                };
+            });
+            
+            // Step 6: Render slides
+            Logger.info('🖼️  Step 5/6: Rendering slides...');
+            const slides = await this.slideRenderer.renderSlides(matchedMemes, thumbnailMemeUrl);
+
+            // Step 7: Create final video
+            Logger.info('🎥 Step 6/6: Creating final video...');
+            const outputPath = await this.videoRenderer.createVideo(slides, audioPath);
+
+            // Get video info
+            const videoInfo = await this.videoRenderer.getVideoInfo(outputPath);
+            
+            Logger.success('🎉 Meme video generation completed!');
+            Logger.success(`📁 Output: ${outputPath}`);
+            Logger.success(`⏱️  Duration: ${Math.round(videoInfo.duration)}s`);
+            Logger.success(`📊 Size: ${Math.round(videoInfo.size / 1024 / 1024)}MB`);
+
+            return outputPath;
 
         } catch (error) {
             Logger.error('❌ Video generation failed:', error);

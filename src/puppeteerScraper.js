@@ -10,7 +10,182 @@ class PuppeteerScraper {
     }
 
     /**
-     * Scrape memes from the configured website and build memes.json
+     * Search for memes dynamically based on keywords from lyrics
+     * @param {Array} keywords - Array of keyword strings to search for
+     * @returns {Array} - Array of {keyword, memeUrl} objects
+     */
+    async searchMemesForKeywords(keywords) {
+        if (!this.memesSiteUrl) {
+            Logger.error('MEME_SITE_URL not configured in environment variables');
+            throw new Error('MEME_SITE_URL required');
+        }
+
+        Logger.info(`🎭 Starting dynamic meme search for ${keywords.length} keywords`);
+        Logger.debug(`Meme site URL: ${this.memesSiteUrl}`);
+        
+        let browser = null;
+        try {
+            Logger.info('🚀 Launching Puppeteer browser...');
+            browser = await puppeteer.launch({
+                headless: 'new', // Changed back to headless for production
+                args: [
+                    '--no-sandbox', 
+                    '--disable-setuid-sandbox', 
+                    '--disable-dev-shm-usage',
+                    '--disable-accelerated-2d-canvas',
+                    '--no-first-run',
+                    '--no-zygote',
+                    '--disable-gpu'
+                ],
+                timeout: 30000
+            });
+            Logger.success('✅ Browser launched successfully');
+        } catch (launchError) {
+            Logger.error('❌ Failed to launch browser:', launchError.message);
+            throw new Error(`Browser launch failed: ${launchError.message}`);
+        }
+
+        const results = [];
+
+        try {
+            Logger.debug('🔧 Creating new browser page...');
+            const page = await browser.newPage();
+            
+            // Enhanced page setup with error handling
+            await page.setUserAgent('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
+            await page.setViewport({ width: 1280, height: 720 });
+            
+            // Add page error listeners
+            page.on('error', (error) => {
+                Logger.error('❌ Page error:', error.message);
+            });
+            
+            page.on('pageerror', (error) => {
+                Logger.warn('⚠️  Page JS error:', error.message);
+            });
+            
+            // Navigate to memes site with enhanced logging
+            Logger.info(`🌐 Navigating to: ${this.memesSiteUrl}`);
+            await page.goto(this.memesSiteUrl, { waitUntil: 'networkidle2', timeout: 15000 });
+            Logger.success('✅ Page loaded successfully');
+            
+            Logger.info(`🔍 Starting search for ${keywords.length} keywords...`);
+            
+            // Process each keyword one by one to avoid rate limiting
+            for (let i = 0; i < keywords.length; i++) {
+                const keyword = keywords[i];
+                Logger.info(`🔎 [${i + 1}/${keywords.length}] Searching: "${keyword}"`);
+                
+                try {
+                    const memeUrl = await this.searchSingleKeyword(page, keyword);
+                    results.push({
+                        keyword: keyword,
+                        memeUrl: memeUrl
+                    });
+                    Logger.success(`✅ Found meme for "${keyword}": ${memeUrl.substring(0, 60)}...`);
+                    
+                    // Rate limiting delay between searches
+                    if (i < keywords.length - 1) {
+                        Logger.debug(`⏱️  Waiting 2 seconds before next search...`);
+                        await page.waitForTimeout(2000);
+                    }
+                    
+                } catch (error) {
+                    Logger.error(`❌ Failed to search for "${keyword}": ${error.message}`);
+                    Logger.debug('Error details:', error.stack);
+                    throw new Error(`Meme search failed for keyword "${keyword}": ${error.message}`);
+                }
+            }
+            
+            Logger.success(`🎉 Completed meme search! Found ${results.length} memes`);
+            return results;
+            
+        } catch (error) {
+            Logger.error('❌ Critical error during meme search:', error.message);
+            Logger.debug('Error details:', error.stack);
+            throw error;
+            
+        } finally {
+            if (browser) {
+                try {
+                    Logger.debug('🔒 Closing browser...');
+                    await browser.close();
+                    Logger.debug('✅ Browser closed successfully');
+                } catch (closeError) {
+                    Logger.warn('⚠️  Error closing browser:', closeError.message);
+                }
+            }
+        }
+    }
+
+    /**
+     * Search for a single keyword and return a random meme URL
+     * @param {Page} page - Puppeteer page object
+     * @param {string} keyword - Keyword to search for
+     * @returns {string} - Meme image URL
+     */
+    async searchSingleKeyword(page, keyword) {
+        try {
+            Logger.debug(`🔍 Searching single keyword: "${keyword}"`);
+            
+            // Clear and fill the search input
+            Logger.debug('🎯 Looking for search input...');
+            const searchInput = await page.waitForSelector('input.search-input', { timeout: 5000 });
+            Logger.debug('✅ Search input found');
+            
+            await searchInput.click({ clickCount: 3 }); // Select all text
+            await searchInput.type(keyword);
+            Logger.debug(`✅ Typed keyword: "${keyword}"`);
+            
+            // Submit search (either press Enter or look for search button)
+            Logger.debug('📤 Submitting search...');
+            await Promise.race([
+                searchInput.press('Enter'),
+                page.click('button[type="submit"], .search-button, .search-btn').catch(() => {})
+            ]);
+            
+            // Wait for results to load
+            Logger.debug('⏱️  Waiting for search results...');
+            await page.waitForTimeout(2000);
+            
+            // Extract meme URLs from the masonry grid
+            Logger.debug('🖼️  Extracting meme URLs from results...');
+            const memeUrls = await page.evaluate(() => {
+                const imageContainers = document.querySelectorAll('.my-masonry-grid .image');
+                const urls = [];
+                
+                imageContainers.forEach(container => {
+                    const img = container.querySelector('img');
+                    if (img && img.src && img.src.startsWith('http')) {
+                        urls.push(img.src);
+                    }
+                });
+                
+                return urls;
+            });
+            
+            Logger.debug(`📊 Found ${memeUrls.length} meme images for "${keyword}"`);
+            
+            if (memeUrls.length === 0) {
+                throw new Error(`No memes found for keyword: "${keyword}"`);
+            }
+            
+            // Randomly select one meme URL
+            const randomIndex = Math.floor(Math.random() * memeUrls.length);
+            const selectedUrl = memeUrls[randomIndex];
+            
+            Logger.debug(`🎲 Random selection: ${randomIndex + 1}/${memeUrls.length} - ${selectedUrl.substring(0, 50)}...`);
+            return selectedUrl;
+            
+        } catch (error) {
+            Logger.error(`❌ Error searching for "${keyword}": ${error.message}`);
+            Logger.debug('Detailed error:', error.stack);
+            throw error;
+        }
+    }
+
+    /**
+     * Legacy method - Scrape memes from the configured website and build memes.json
      * @returns {Array} - Array of meme objects with keywords and URLs
      */
     async scrapeMemes() {
@@ -187,38 +362,7 @@ class PuppeteerScraper {
         }
     }
 
-    /**
-     * Add default fallback memes for common keywords
-     * @returns {Array} - Array of default meme objects
-     */
-    getDefaultMemes() {
-        return [
-            {
-                keywords: ['default', 'error', 'unknown', 'fallback'],
-                url: process.env.FALLBACK_MEME_URL || 'https://i.imgflip.com/30b1gx.jpg' // "This is Fine" meme
-            },
-            {
-                keywords: ['happy', 'joy', 'celebration', 'party', 'excited'],
-                url: 'https://i.imgflip.com/1g8my4.jpg' // Drake pointing
-            },
-            {
-                keywords: ['sad', 'cry', 'depression', 'lonely', 'down'],
-                url: 'https://i.imgflip.com/1biioo.jpg' // Sad Pablo Escobar
-            },
-            {
-                keywords: ['confused', 'what', 'lost', 'puzzled'],
-                url: 'https://i.imgflip.com/2zo1ki.jpg' // Confused Jackie Chan
-            },
-            {
-                keywords: ['angry', 'mad', 'rage', 'furious'],
-                url: 'https://i.imgflip.com/1o00in.jpg' // Angry Baby
-            },
-            {
-                keywords: ['love', 'heart', 'romantic', 'valentine'],
-                url: 'https://i.imgflip.com/26jxvz.jpg' // Wholesome meme
-            }
-        ];
-    }
+
 }
 
 // CLI interface for standalone scraping
