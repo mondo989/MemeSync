@@ -40,9 +40,13 @@
 
         .apu-logo-overlay {
             position: absolute;
-            bottom: -125px; /* Bottom 10% of viewport (90% from top) */
-            left: 50%;
-            transform: translateX(-50%); /* Center horizontally only */
+            left: 0;
+            right: 0;
+            margin: auto;
+            text-align: center;
+            bottom: -110px; /* Bottom 10% of viewport (90% from top) */
+            scale: 2;
+            /* transform: translateX(-50%); Center horizontally only */
             z-index: 9999; /* Highest z-index to appear over memes */
             max-width: 15%; /* Responsive size */
             max-height: 8%; /* Limit height to prevent being too large */
