@@ -153,10 +153,10 @@ class PuppeteerScraper {
                     });
                     Logger.success(`✅ Found meme for "${keyword}": ${memeUrl.substring(0, 60)}...`);
                     
-                    // Rate limiting delay between searches (reduced since we're more efficient now)
+                    // Rate limiting delay between searches to ensure proper loading
                     if (i < keywords.length - 1) {
                         Logger.debug(`⏱️  Brief pause before next search...`);
-                        await page.waitForTimeout(500);
+                        await page.waitForTimeout(1000); // Increased delay for better stability
                     }
                     
                 } catch (error) {
@@ -235,17 +235,24 @@ class PuppeteerScraper {
                 await page.keyboard.press('Enter');
             }
             
-            // Wait for results with improved detection
+            // Brief wait after search submission for page to start loading
+            Logger.debug('⏳ Brief wait for search to initiate...');
+            await page.waitForTimeout(1500);
+            
+            // Wait for results with improved detection and longer timeout
             Logger.debug('⏱️  Waiting for search results to load...');
             try {
                 // Wait for either the masonry grid or a "no results" indicator
                 await Promise.race([
-                    page.waitForSelector('.my-masonry-grid .image', { timeout: 3000 }),
-                    page.waitForSelector('.no-results, .empty-results', { timeout: 3000 }).catch(() => {})
+                    page.waitForSelector('.my-masonry-grid .image', { timeout: 8000 }),
+                    page.waitForSelector('.no-results, .empty-results', { timeout: 8000 }).catch(() => {})
                 ]);
+                // Additional wait for images to fully load within the grid
+                Logger.debug('⏳ Waiting for meme images to fully load...');
+                await page.waitForTimeout(3000);
             } catch (waitError) {
                 Logger.debug('Using fallback wait time for results');
-                await page.waitForTimeout(2000);
+                await page.waitForTimeout(5000); // Increased fallback wait time
             }
             
             // Extract meme URLs from the masonry grid with enhanced selectors
@@ -257,31 +264,93 @@ class PuppeteerScraper {
                     '.masonry-grid img',
                     '.search-results img',
                     '.meme-grid img',
-                    '.image-container img',
-                    'img[src*="meme"]'
+                    '.image-container img'
                 ];
                 
                 const urls = [];
+                
+                // Helper function to check if an image is likely a navbar/logo/icon
+                const isNavbarOrLogoImage = (imgSrc, imgElement) => {
+                    if (!imgSrc) return true;
+                    
+                    // Exclude common navbar/logo/icon patterns
+                    const excludePatterns = [
+                        /\/icon/i,
+                        /\/logo/i,
+                        /\/nav/i,
+                        /\/header/i,
+                        /\/footer/i,
+                        /\/menu/i,
+                        /\/sprite/i,
+                        /\.svg$/i,
+                        /\/assets\/images\/ui/i,
+                        /apu_icon/i,
+                        /apu_logo/i,
+                        /navigation/i
+                    ];
+                    
+                    // Check if URL matches any exclude patterns
+                    if (excludePatterns.some(pattern => pattern.test(imgSrc))) {
+                        return true;
+                    }
+                    
+                    // Check image dimensions - likely navbar/logo if too small or in header area
+                    if (imgElement) {
+                        const rect = imgElement.getBoundingClientRect();
+                        const computedStyle = window.getComputedStyle(imgElement);
+                        
+                        // Skip if image is too small (likely an icon)
+                        if (rect.width < 50 || rect.height < 50) {
+                            return true;
+                        }
+                        
+                        // Skip if image is in header/nav area (top 100px of page)
+                        if (rect.top < 100) {
+                            return true;
+                        }
+                        
+                        // Skip if parent has navbar-like classes
+                        let parent = imgElement.parentElement;
+                        while (parent) {
+                            const parentClass = parent.className || '';
+                            if (parentClass.match(/nav|header|menu|logo|brand|top-bar/i)) {
+                                return true;
+                            }
+                            parent = parent.parentElement;
+                            // Only check up to 3 levels up
+                            if (parent === document.body) break;
+                        }
+                    }
+                    
+                    return false;
+                };
                 
                 for (const selector of selectors) {
                     const images = document.querySelectorAll(selector);
                     if (images.length > 0) {
                         images.forEach(img => {
-                            if (img.src && img.src.startsWith('http') && img.src.includes('meme')) {
+                            if (img.src && img.src.startsWith('http') && !isNavbarOrLogoImage(img.src, img)) {
                                 urls.push(img.src);
                             }
                         });
-                        break; // Stop after finding images with the first working selector
+                        if (urls.length > 0) break; // Stop after finding valid images with the first working selector
                     }
                 }
                 
-                // Fallback: try any image in the results area
+                // Fallback: try any image in the results area, but be more selective
                 if (urls.length === 0) {
                     const allImages = document.querySelectorAll('img');
                     allImages.forEach(img => {
-                        if (img.src && img.src.startsWith('http') && 
-                            (img.src.includes('meme') || img.alt?.toLowerCase().includes('meme'))) {
-                            urls.push(img.src);
+                        if (img.src && img.src.startsWith('http') && !isNavbarOrLogoImage(img.src, img)) {
+                            // Additional check for images that might be actual meme content
+                            const isLikelyMemeContent = img.alt?.toLowerCase().includes('meme') || 
+                                                       img.src.includes('/memes/') ||
+                                                       img.src.includes('/uploads/') ||
+                                                       img.src.includes('/images/') && !img.src.includes('/ui/');
+                            
+                            if (isLikelyMemeContent) {
+                                urls.push(img.src);
+                            }
                         }
                     });
                 }
@@ -290,6 +359,11 @@ class PuppeteerScraper {
             });
             
             Logger.debug(`📊 Found ${memeUrls.length} meme images for "${keyword}"`);
+            
+            // Log first few URLs for debugging
+            if (memeUrls.length > 0) {
+                Logger.debug(`🔍 Sample URLs found:`, memeUrls.slice(0, 3).map(url => url.substring(0, 80)));
+            }
             
             if (memeUrls.length === 0) {
                 throw new Error(`No memes found for keyword: "${keyword}"`);

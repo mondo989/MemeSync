@@ -41,7 +41,7 @@ class SlideRenderer {
                 Logger.info(`Launching browser (attempt ${attempt}/${maxRetries})`);
                 
                 browser = await puppeteer.launch({
-                    headless: true, // Back to headless for production
+                    headless: 'new', // Back to headless for production
                     executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
                     args: [
                         '--no-sandbox', 
