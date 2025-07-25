@@ -9,6 +9,7 @@ lerna-debug.log*
 .env
 .env.local
 .env.*.local
+.cursorrules
 
 node_modules
 dist
