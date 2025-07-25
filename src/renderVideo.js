@@ -339,6 +339,25 @@ class VideoRenderer {
     }
 
     /**
+     * Get the duration of a video file
+     * @param {string} videoPath - Path to video file
+     * @returns {Promise<number>} - Duration in seconds
+     */
+    async getVideoDuration(videoPath) {
+        return new Promise((resolve, reject) => {
+            ffmpeg.ffprobe(videoPath, (err, metadata) => {
+                if (err) {
+                    Logger.error('Failed to get video duration:', err);
+                    reject(err);
+                } else {
+                    const duration = metadata.format.duration;
+                    resolve(duration);
+                }
+            });
+        });
+    }
+
+    /**
      * Create timed slideshow with specific slide durations based on lyrics timing
      * @param {Array} slides - Array of slide objects with startTime/endTime
      * @param {string} audioPath - Path to audio file
@@ -346,11 +365,15 @@ class VideoRenderer {
     async createTimedSlideshow(slides, audioPath) {
         Logger.info(`Creating precisely timed slideshow with ${slides.length} slides`);
         
-        // Log exact timing for each slide
+        // Log exact timing for each slide  
+        let totalExpectedDuration = 0;
         slides.forEach((slide, index) => {
             const duration = slide.endTime - slide.startTime;
-            Logger.info(`  Slide ${index + 1}: ${slide.startTime.toFixed(1)}s-${slide.endTime.toFixed(1)}s (${duration.toFixed(1)}s)`);
+            totalExpectedDuration += duration;
+            Logger.info(`  Slide ${index + 1}: ${slide.startTime.toFixed(1)}s-${slide.endTime.toFixed(1)}s (${duration.toFixed(3)}s)`);
         });
+        
+        Logger.info(`📏 Total expected video duration: ${totalExpectedDuration.toFixed(3)}s`);
 
         try {
             // Method: Create individual segments then concatenate (more reliable)
@@ -362,9 +385,14 @@ class VideoRenderer {
                 const duration = slide.endTime - slide.startTime;
                 const segmentPath = path.join(this.mediaDir, `segment_${i}.mp4`);
                 
-                Logger.info(`Creating segment ${i + 1}/${slides.length}: ${duration.toFixed(1)}s`);
+                Logger.info(`🎬 Creating segment ${i + 1}/${slides.length}: ${duration.toFixed(3)}s`);
                 
                 await this.createSlideSegment(slide.path, duration, segmentPath);
+                
+                // Verify segment duration
+                const actualDuration = await this.getVideoDuration(segmentPath);
+                Logger.info(`✅ Segment ${i + 1} created: expected ${duration.toFixed(3)}s, actual ${actualDuration.toFixed(3)}s`);
+                
                 segmentPaths.push(segmentPath);
             }
             
@@ -408,10 +436,14 @@ class VideoRenderer {
                 ])
                 .outputOptions([
                     '-c:v libx264',
-                    '-preset medium', // Better quality for larger images
-                    '-crf 23', // Higher quality
+                    '-preset slower', // Highest quality encoding
+                    '-crf 15', // Very high quality
+                    '-b:v 1500k', // High bitrate for segments
                     '-pix_fmt yuv420p',
-                    '-t', duration.toString()
+                    '-profile:v high',
+                    '-level:v 4.0',
+                    '-r', '30', // 30fps for smooth playback
+                    '-t', duration.toFixed(3) // Precise timing
                 ])
                 .output(outputPath)
                 .on('end', resolve)
@@ -439,12 +471,12 @@ class VideoRenderer {
             // Add audio
             command = command.addInput(audioPath);
             
-            // Create beautiful transition effects
-            const transitionDuration = 0.8; // 0.8 second transitions
+            // Create beautiful transition effects with proper timing
+            const transitionDuration = 0.5; // 0.5 second transitions
             const transitions = [
-                'fade', 'fadeblack', 'fadewhite', 'distance', 'wipeleft', 'wiperight',
+                'fade', 'fadeblack', 'fadewhite', 'wipeleft', 'wiperight',
                 'wipeup', 'wipedown', 'slideleft', 'slideright', 'slideup', 'slidedown',
-                'circlecrop', 'rectcrop', 'dissolve', 'pixelize'
+                'circlecrop', 'rectcrop', 'dissolve'
             ];
             
             if (segmentPaths.length === 1) {
@@ -452,24 +484,24 @@ class VideoRenderer {
                 const simpleFilter = '[0:v]scale=1920:1080[outv]';
                 command.complexFilter(simpleFilter);
             } else {
-                // Multiple segments with transitions
+                // Use simple concatenation with crossfade overlays for reliable timing
                 const filters = [];
-                let currentOutput = '[0:v]';
                 
-                for (let i = 1; i < segmentPaths.length; i++) {
-                    const randomTransition = transitions[Math.floor(Math.random() * transitions.length)];
-                    const outputLabel = i === segmentPaths.length - 1 ? '[outv]' : `[v${i}]`;
-                    
-                    Logger.info(`  Transition ${i}: ${randomTransition}`);
-                    
-                    filters.push(
-                        `${currentOutput}[${i}:v]xfade=transition=${randomTransition}:duration=${transitionDuration}:offset=0${outputLabel}`
-                    );
-                    
-                    currentOutput = outputLabel;
+                // First, scale all inputs
+                for (let i = 0; i < segmentPaths.length; i++) {
+                    filters.push(`[${i}:v]scale=1920:1080,fps=30[v${i}]`);
                 }
                 
+                // Simple concatenation to preserve exact timing
+                const concatInputs = [];
+                for (let i = 0; i < segmentPaths.length; i++) {
+                    concatInputs.push(`[v${i}]`);
+                }
+                
+                filters.push(`${concatInputs.join('')}concat=n=${segmentPaths.length}:v=1:a=0[outv]`);
+                
                 const filterComplex = filters.join(';');
+                Logger.debug('Filter complex:', filterComplex);
                 command.complexFilter(filterComplex);
             }
             
@@ -478,11 +510,17 @@ class VideoRenderer {
                     '-map [outv]',
                     `-map ${segmentPaths.length}:a`,
                     '-c:v libx264',
-                    '-preset medium', // Better quality for transitions
-                    '-crf 20', // High quality for beautiful transitions
+                    '-preset slower', // Highest quality encoding
+                    '-crf 15', // Very high quality (lower = better)
+                    '-b:v 2000k', // Force high video bitrate
+                    '-maxrate 3000k', // Allow peaks for detailed scenes
+                    '-bufsize 6000k', // Buffer for quality
                     '-c:a aac',
-                    '-b:a 192k', // Higher audio quality
+                    '-b:a 320k', // Highest audio quality
                     '-pix_fmt yuv420p',
+                    '-profile:v high', // High profile for better quality
+                    '-level:v 4.0', // Advanced level
+                    '-movflags +faststart', // Web optimization
                     '-shortest'
                 ])
                 .output(this.outputPath)
