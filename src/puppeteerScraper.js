@@ -20,30 +20,37 @@ class PuppeteerScraper {
             throw new Error('MEME_SITE_URL required');
         }
 
-        Logger.info(`🎭 Starting dynamic meme search for ${keywords.length} keywords`);
+        Logger.info(`🎭 Starting optimized meme search for ${keywords.length} keywords`);
         Logger.debug(`Meme site URL: ${this.memesSiteUrl}`);
+        Logger.info('💡 Using single browser instance with page reuse for efficiency');
         
         let browser = null;
         Logger.info('🚀 Launching Puppeteer browser...');
         
-        // Try multiple launch configurations for macOS stability
+        // Try multiple launch configurations for macOS stability and port conflicts
         const launchConfigs = [
-            // Use system Chrome (most stable)
+            // Use system Chrome (most stable) with random port to avoid conflicts
             {
-                headless: 'new', // Back to headless for production
+                headless: 'new',
                 executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
                 args: [
                     '--no-sandbox',
                     '--disable-setuid-sandbox',
                     '--disable-dev-shm-usage',
-                    '--disable-gpu'
+                    '--disable-gpu',
+                    '--disable-web-security',
+                    '--remote-debugging-port=0' // Use random available port
                 ],
                 timeout: 10000
             },
-            // Fallback to Puppeteer's Chrome
+            // Fallback to Puppeteer's Chrome with random port
             {
                 headless: 'new',
-                args: ['--no-sandbox', '--disable-setuid-sandbox'],
+                args: [
+                    '--no-sandbox', 
+                    '--disable-setuid-sandbox',
+                    '--remote-debugging-port=0'
+                ],
                 timeout: 10000
             }
         ];
@@ -122,12 +129,23 @@ class PuppeteerScraper {
             
             Logger.info(`🔍 Starting search for ${keywords.length} keywords...`);
             
-            // Process each keyword one by one to avoid rate limiting
+            // Store initial page state to return to if needed
+            const initialUrl = page.url();
+            
+            // Process each keyword one by one using the same page instance
             for (let i = 0; i < keywords.length; i++) {
                 const keyword = keywords[i];
                 Logger.info(`🔎 [${i + 1}/${keywords.length}] Searching: "${keyword}"`);
                 
                 try {
+                    // Ensure we're on the right page (in case of redirects or errors)
+                    const currentUrl = page.url();
+                    if (!currentUrl.includes(this.memesSiteUrl.split('/')[2])) {
+                        Logger.debug('🔄 Returning to main search page...');
+                        await page.goto(this.memesSiteUrl, { waitUntil: 'domcontentloaded', timeout: 5000 });
+                        await page.waitForTimeout(500); // Brief wait for page to stabilize
+                    }
+                    
                     const memeUrl = await this.searchSingleKeyword(page, keyword);
                     results.push({
                         keyword: keyword,
@@ -135,20 +153,31 @@ class PuppeteerScraper {
                     });
                     Logger.success(`✅ Found meme for "${keyword}": ${memeUrl.substring(0, 60)}...`);
                     
-                    // Rate limiting delay between searches
+                    // Rate limiting delay between searches (reduced since we're more efficient now)
                     if (i < keywords.length - 1) {
-                        Logger.debug(`⏱️  Waiting 1 seconds before next search...`);
-                        await page.waitForTimeout(1000);
+                        Logger.debug(`⏱️  Brief pause before next search...`);
+                        await page.waitForTimeout(500);
                     }
                     
                 } catch (error) {
                     Logger.error(`❌ Failed to search for "${keyword}": ${error.message}`);
                     Logger.debug('Error details:', error.stack);
+                    
+                    // Try to recover by returning to the main page
+                    try {
+                        Logger.debug('🔧 Attempting recovery by returning to main page...');
+                        await page.goto(this.memesSiteUrl, { waitUntil: 'domcontentloaded', timeout: 5000 });
+                        await page.waitForTimeout(1000);
+                    } catch (recoveryError) {
+                        Logger.warn('Recovery attempt failed:', recoveryError.message);
+                    }
+                    
                     throw new Error(`Meme search failed for keyword "${keyword}": ${error.message}`);
                 }
             }
             
-            Logger.success(`🎉 Completed meme search! Found ${results.length} memes`);
+            Logger.success(`🎉 Optimized meme search completed! Found ${results.length} memes using single browser instance`);
+            Logger.info(`⚡ Efficiency gains: Reused page instance for all ${keywords.length} searches`);
             return results;
             
         } catch (error) {
@@ -179,40 +208,85 @@ class PuppeteerScraper {
         try {
             Logger.debug(`🔍 Searching single keyword: "${keyword}"`);
             
-            // Clear and fill the search input
-            Logger.debug('🎯 Looking for search input...');
+            // Efficiently clear and fill the search input
+            Logger.debug('🎯 Locating search input...');
             const searchInput = await page.waitForSelector('input.search-input', { timeout: 5000 });
             Logger.debug('✅ Search input found');
             
-            await searchInput.click({ clickCount: 3 }); // Select all text
-            await searchInput.type(keyword);
-            Logger.debug(`✅ Typed keyword: "${keyword}"`);
+            // More efficient input clearing and typing
+            await searchInput.focus();
+            await page.keyboard.down('Control');
+            await page.keyboard.press('KeyA'); // Select all
+            await page.keyboard.up('Control');
+            await page.keyboard.type(keyword);
+            Logger.debug(`✅ Efficiently typed keyword: "${keyword}"`);
             
-            // Submit search (either press Enter or look for search button)
+            // Submit search with improved error handling
             Logger.debug('📤 Submitting search...');
-            await Promise.race([
-                searchInput.press('Enter'),
-                page.click('button[type="submit"], .search-button, .search-btn').catch(() => {})
-            ]);
+            try {
+                await Promise.race([
+                    page.keyboard.press('Enter'),
+                    page.click('button[type="submit"], .search-button, .search-btn').catch(() => {
+                        Logger.debug('Search button not found, using Enter key');
+                    })
+                ]);
+            } catch (submitError) {
+                Logger.debug('Search submission fallback triggered');
+                await page.keyboard.press('Enter');
+            }
             
-            // Wait for results to load
-            Logger.debug('⏱️  Waiting for search results...');
-            await page.waitForTimeout(2000);
+            // Wait for results with improved detection
+            Logger.debug('⏱️  Waiting for search results to load...');
+            try {
+                // Wait for either the masonry grid or a "no results" indicator
+                await Promise.race([
+                    page.waitForSelector('.my-masonry-grid .image', { timeout: 3000 }),
+                    page.waitForSelector('.no-results, .empty-results', { timeout: 3000 }).catch(() => {})
+                ]);
+            } catch (waitError) {
+                Logger.debug('Using fallback wait time for results');
+                await page.waitForTimeout(2000);
+            }
             
-            // Extract meme URLs from the masonry grid
-            Logger.debug('🖼️  Extracting meme URLs from results...');
+            // Extract meme URLs from the masonry grid with enhanced selectors
+            Logger.debug('🖼️  Extracting meme URLs from search results...');
             const memeUrls = await page.evaluate(() => {
-                const imageContainers = document.querySelectorAll('.my-masonry-grid .image');
+                // Try multiple possible selectors for different site layouts
+                const selectors = [
+                    '.my-masonry-grid .image img',
+                    '.masonry-grid img',
+                    '.search-results img',
+                    '.meme-grid img',
+                    '.image-container img',
+                    'img[src*="meme"]'
+                ];
+                
                 const urls = [];
                 
-                imageContainers.forEach(container => {
-                    const img = container.querySelector('img');
-                    if (img && img.src && img.src.startsWith('http')) {
-                        urls.push(img.src);
+                for (const selector of selectors) {
+                    const images = document.querySelectorAll(selector);
+                    if (images.length > 0) {
+                        images.forEach(img => {
+                            if (img.src && img.src.startsWith('http') && img.src.includes('meme')) {
+                                urls.push(img.src);
+                            }
+                        });
+                        break; // Stop after finding images with the first working selector
                     }
-                });
+                }
                 
-                return urls;
+                // Fallback: try any image in the results area
+                if (urls.length === 0) {
+                    const allImages = document.querySelectorAll('img');
+                    allImages.forEach(img => {
+                        if (img.src && img.src.startsWith('http') && 
+                            (img.src.includes('meme') || img.alt?.toLowerCase().includes('meme'))) {
+                            urls.push(img.src);
+                        }
+                    });
+                }
+                
+                return [...new Set(urls)]; // Remove duplicates
             });
             
             Logger.debug(`📊 Found ${memeUrls.length} meme images for "${keyword}"`);

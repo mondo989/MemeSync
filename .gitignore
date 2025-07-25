@@ -11,6 +11,7 @@ lerna-debug.log*
 .env.*.local
 .cursorrules
 slides
+media
 
 node_modules
 dist
