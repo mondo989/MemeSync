@@ -30,7 +30,7 @@ class PuppeteerScraper {
         const launchConfigs = [
             // Use system Chrome (most stable)
             {
-                headless: false,
+                headless: true, // Back to headless for production
                 executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
                 args: [
                     '--no-sandbox',
@@ -42,7 +42,7 @@ class PuppeteerScraper {
             },
             // Fallback to Puppeteer's Chrome
             {
-                headless: false,
+                headless: true,
                 args: ['--no-sandbox', '--disable-setuid-sandbox'],
                 timeout: 10000
             }

@@ -43,7 +43,7 @@ class SlideRenderer {
                 Logger.info(`Launching browser (attempt ${attempt}/${maxRetries})`);
                 
                 browser = await puppeteer.launch({
-                    headless: false, // Use visible browser for debugging
+                    headless: true, // Back to headless for production
                     executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
                     args: [
                         '--no-sandbox', 
@@ -235,8 +235,9 @@ class SlideRenderer {
         Logger.info(`Rendering animated frames at ${fps} FPS...`);
         
         const browser = await puppeteer.launch({
-            headless: 'new',
-            args: ['--no-sandbox', '--disable-setuid-sandbox']
+            headless: true,
+            executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+            args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-gpu']
         });
 
         try {

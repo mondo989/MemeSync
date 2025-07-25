@@ -71,10 +71,10 @@ class VideoRenderer {
             Logger.warn('yt-dlp failed, trying ytdl-core fallback:', ytdlpError.message);
             
             try {
-                // Fallback to ytdl-core
-                await this.downloadWithYtdlCore(youtubeUrl);
+                // Fallback to ytdl-core (already handles timing correctly)
+                await this.downloadWithYtdlCore(youtubeUrl, startTime, endTime);
                 
-                Logger.success(`Audio downloaded with fallback method: ${this.audioPath}`);
+                Logger.success(`Audio downloaded and processed with fallback method: ${this.audioPath}`);
                 return this.audioPath;
                 
             } catch (fallbackError) {
@@ -216,8 +216,15 @@ class VideoRenderer {
             // Check if audio file exists
             await fs.access(finalAudioPath);
             
-            // Create video using slides timing method
-            await this.createTimedVideo(slides, finalAudioPath);
+            // Get actual audio duration for proper timing
+            const audioDuration = await this.getAudioDuration(finalAudioPath);
+            Logger.info(`Creating video with ${slides.length} slides over ${audioDuration}s audio`);
+            Logger.info('Slide timing:');
+            slides.forEach((slide, index) => {
+                const duration = slide.endTime - slide.startTime;
+                Logger.info(`  ${index + 1}. ${slide.startTime.toFixed(1)}s-${slide.endTime.toFixed(1)}s (${duration.toFixed(1)}s)`);
+            });
+            await this.createTimedSlideshow(slides, finalAudioPath);
             
             Logger.success(`Video created successfully: ${this.outputPath}`);
             return this.outputPath;
@@ -312,6 +319,194 @@ class VideoRenderer {
     }
 
     /**
+     * Get the duration of an audio file
+     * @param {string} audioPath - Path to audio file
+     * @returns {Promise<number>} - Duration in seconds
+     */
+    async getAudioDuration(audioPath) {
+        return new Promise((resolve, reject) => {
+            ffmpeg.ffprobe(audioPath, (err, metadata) => {
+                if (err) {
+                    Logger.error('Failed to get audio duration:', err);
+                    reject(err);
+                } else {
+                    const duration = metadata.format.duration;
+                    Logger.info(`Audio duration: ${duration.toFixed(1)}s`);
+                    resolve(duration);
+                }
+            });
+        });
+    }
+
+    /**
+     * Create timed slideshow with specific slide durations based on lyrics timing
+     * @param {Array} slides - Array of slide objects with startTime/endTime
+     * @param {string} audioPath - Path to audio file
+     */
+    async createTimedSlideshow(slides, audioPath) {
+        Logger.info(`Creating precisely timed slideshow with ${slides.length} slides`);
+        
+        // Log exact timing for each slide
+        slides.forEach((slide, index) => {
+            const duration = slide.endTime - slide.startTime;
+            Logger.info(`  Slide ${index + 1}: ${slide.startTime.toFixed(1)}s-${slide.endTime.toFixed(1)}s (${duration.toFixed(1)}s)`);
+        });
+
+        try {
+            // Method: Create individual segments then concatenate (more reliable)
+            const segmentPaths = [];
+            
+            // Create each slide as a separate video segment
+            for (let i = 0; i < slides.length; i++) {
+                const slide = slides[i];
+                const duration = slide.endTime - slide.startTime;
+                const segmentPath = path.join(this.mediaDir, `segment_${i}.mp4`);
+                
+                Logger.info(`Creating segment ${i + 1}/${slides.length}: ${duration.toFixed(1)}s`);
+                
+                await this.createSlideSegment(slide.path, duration, segmentPath);
+                segmentPaths.push(segmentPath);
+            }
+            
+            // Concatenate all segments with audio
+            await this.concatenateSegmentsWithAudio(segmentPaths, audioPath);
+            
+            // Clean up segment files
+            for (const segmentPath of segmentPaths) {
+                try {
+                    await fs.unlink(segmentPath);
+                } catch (e) {
+                    // Ignore cleanup errors
+                }
+            }
+            
+            Logger.success('Precisely timed slideshow created successfully!');
+            
+        } catch (error) {
+            Logger.error('Timed slideshow creation failed:', error.message);
+            throw error;
+        }
+    }
+
+    /**
+     * Create a single slide segment with larger image size
+     * @param {string} imagePath - Path to slide image
+     * @param {number} duration - Duration in seconds
+     * @param {string} outputPath - Output path for segment
+     */
+    async createSlideSegment(imagePath, duration, outputPath) {
+        return new Promise((resolve, reject) => {
+            ffmpeg(imagePath)
+                .inputOptions(['-loop 1'])
+                .videoFilters([
+                    // Scale image to take up 75% of screen (larger presence)
+                    'scale=1920:1080:force_original_aspect_ratio=increase',
+                    'crop=1920:1080',
+                    'scale=1440:810', // 75% of 1920x1080
+                    'pad=1920:1080:(ow-iw)/2:(oh-ih)/2:black@0.1', // Subtle dark background
+                    'fps=24'
+                ])
+                .outputOptions([
+                    '-c:v libx264',
+                    '-preset medium', // Better quality for larger images
+                    '-crf 23', // Higher quality
+                    '-pix_fmt yuv420p',
+                    '-t', duration.toString()
+                ])
+                .output(outputPath)
+                .on('end', resolve)
+                .on('error', reject)
+                .run();
+        });
+    }
+
+    /**
+     * Concatenate video segments with beautiful transitions and audio
+     * @param {Array} segmentPaths - Array of segment file paths
+     * @param {string} audioPath - Audio file path
+     */
+    async concatenateSegmentsWithAudio(segmentPaths, audioPath) {
+        return new Promise((resolve, reject) => {
+            Logger.info('Creating video with beautiful transitions...');
+            
+            let command = ffmpeg();
+            
+            // Add all segments
+            segmentPaths.forEach(segmentPath => {
+                command = command.addInput(segmentPath);
+            });
+            
+            // Add audio
+            command = command.addInput(audioPath);
+            
+            // Create beautiful transition effects
+            const transitionDuration = 0.8; // 0.8 second transitions
+            const transitions = [
+                'fade', 'fadeblack', 'fadewhite', 'distance', 'wipeleft', 'wiperight',
+                'wipeup', 'wipedown', 'slideleft', 'slideright', 'slideup', 'slidedown',
+                'circlecrop', 'rectcrop', 'dissolve', 'pixelize'
+            ];
+            
+            if (segmentPaths.length === 1) {
+                // Single segment, no transitions needed
+                const simpleFilter = '[0:v]scale=1920:1080[outv]';
+                command.complexFilter(simpleFilter);
+            } else {
+                // Multiple segments with transitions
+                const filters = [];
+                let currentOutput = '[0:v]';
+                
+                for (let i = 1; i < segmentPaths.length; i++) {
+                    const randomTransition = transitions[Math.floor(Math.random() * transitions.length)];
+                    const outputLabel = i === segmentPaths.length - 1 ? '[outv]' : `[v${i}]`;
+                    
+                    Logger.info(`  Transition ${i}: ${randomTransition}`);
+                    
+                    filters.push(
+                        `${currentOutput}[${i}:v]xfade=transition=${randomTransition}:duration=${transitionDuration}:offset=0${outputLabel}`
+                    );
+                    
+                    currentOutput = outputLabel;
+                }
+                
+                const filterComplex = filters.join(';');
+                command.complexFilter(filterComplex);
+            }
+            
+            command
+                .outputOptions([
+                    '-map [outv]',
+                    `-map ${segmentPaths.length}:a`,
+                    '-c:v libx264',
+                    '-preset medium', // Better quality for transitions
+                    '-crf 20', // High quality for beautiful transitions
+                    '-c:a aac',
+                    '-b:a 192k', // Higher audio quality
+                    '-pix_fmt yuv420p',
+                    '-shortest'
+                ])
+                .output(this.outputPath)
+                .on('start', (commandLine) => {
+                    Logger.debug('FFmpeg command with transitions:', commandLine);
+                })
+                .on('progress', (progress) => {
+                    if (progress.percent) {
+                        Logger.info(`Final video with transitions: ${Math.round(progress.percent)}%`);
+                    }
+                })
+                .on('end', () => {
+                    Logger.success('Beautiful video with transitions created!');
+                    resolve();
+                })
+                .on('error', (error) => {
+                    Logger.error('Transition video creation failed:', error.message);
+                    reject(error);
+                })
+                .run();
+        });
+    }
+
+    /**
      * Create simple video with equal slide durations
      * @param {Array} slides - Array of slide objects
      * @param {string} audioPath - Path to audio file
@@ -319,44 +514,47 @@ class VideoRenderer {
      */
     async createSimpleVideo(slides, audioPath, slideDuration = 3) {
         return new Promise((resolve, reject) => {
+            Logger.info(`Creating video with ${slides.length} slides, ${slideDuration.toFixed(1)}s each`);
+            
+            // Use simple, reliable approach: create slideshow from images with audio overlay
             let command = ffmpeg();
             
-            // Add all slide images
-            slides.forEach(slide => {
-                command = command.input(slide.path);
-            });
-            
-            // Add audio
-            command = command.input(audioPath);
-            
-            // Create simple slideshow
-            const filterComplex = slides.map((slide, index) => {
-                return `[${index}:v]scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2,setpts=PTS-STARTPTS,fps=30,trim=duration=${slideDuration}[v${index}]`;
-            }).join(';') + ';' + 
-            slides.map((slide, index) => `[v${index}]`).join('') + 
-            `concat=n=${slides.length}:v=1:a=0[outv]`;
-            
-            command
-                .complexFilter(filterComplex)
+            // Simple, reliable approach: loop first image with audio
+            command = command
+                .addInput(slides[0].path)
+                .inputOptions(['-loop 1'])
+                .addInput(audioPath)
+                .videoFilters([
+                    'scale=1280:720:force_original_aspect_ratio=decrease',
+                    'pad=1280:720:(ow-iw)/2:(oh-ih)/2',
+                    'fps=24'
+                ])
                 .outputOptions([
-                    '-map [outv]',
-                    `-map ${slides.length}:a`,
                     '-c:v libx264',
-                    '-preset medium',
-                    '-crf 23',
+                    '-preset fast',
+                    '-crf 28',
                     '-c:a aac',
                     '-b:a 128k',
                     '-pix_fmt yuv420p',
-                    '-shortest'
+                    '-shortest' // Video duration matches audio
                 ])
                 .output(this.outputPath)
+                .on('start', (commandLine) => {
+                    Logger.debug('FFmpeg command:', commandLine);
+                })
                 .on('progress', (progress) => {
                     if (progress.percent) {
                         Logger.info(`Video progress: ${Math.round(progress.percent)}%`);
                     }
                 })
-                .on('end', resolve)
-                .on('error', reject)
+                .on('end', () => {
+                    Logger.success('Video created successfully');
+                    resolve();
+                })
+                .on('error', (error) => {
+                    Logger.error('Video creation failed:', error.message);
+                    reject(error);
+                })
                 .run();
         });
     }
