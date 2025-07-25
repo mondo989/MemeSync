@@ -72,12 +72,13 @@ class TranscriptionService {
             Logger.info('Raw LemonFox response:', JSON.stringify(response.data, null, 2));
             let transcript = this.parseLemonFoxResponse(response.data);
             
-            // Filter by time range if specified
+            // No need to filter by time - audio was already trimmed to the exact range
+            Logger.info(`Transcription completed: ${transcript.length} segments from trimmed audio`);
             if (startTime && endTime) {
-                transcript = this.filterTranscriptByTime(transcript, startTime, endTime);
+                Logger.info(`Original time range: ${startTime}-${endTime}`);
             }
 
-            Logger.success(`Transcription completed: ${transcript.length} segments for time range ${startTime}-${endTime}`);
+            Logger.success(`Transcription completed: ${transcript.length} segments`);
             return transcript;
 
         } catch (error) {
