@@ -7,8 +7,6 @@ class SlideRenderer {
     constructor() {
         this.templatePath = path.join(__dirname, '../public/template.html');
         this.slidesDir = path.join(__dirname, '../slides');
-        this.animations = ['fade-in', 'zoom-in', 'slide-left', 'spin-in'];
-        this.slideDuration = parseInt(process.env.SLIDE_ANIMATION_DURATION) || 3000;
     }
 
     /**
@@ -52,8 +50,8 @@ class SlideRenderer {
                         '--disable-gpu'
                     ],
                     defaultViewport: {
-                        width: 1280,
-                        height: 720
+                        width: 1920,
+                        height: 1080
                     },
                     timeout: 10000
                 });
@@ -78,9 +76,7 @@ class SlideRenderer {
                 const thumbnailSlide = await this.renderSingleSlide(
                     browser, 
                     thumbnailMemeUrl, 
-                    'thumbnail_slide.png',
-                    'fade-in',
-                    5000 // 5 second duration for intro
+                    'thumbnail_slide.png'
                 );
                 slides.push(thumbnailSlide);
             }
@@ -88,15 +84,12 @@ class SlideRenderer {
             // Render meme slides
             for (let i = 0; i < matchedMemes.length; i++) {
                 const matchedMeme = matchedMemes[i];
-                const animation = this.getRandomAnimation();
                 const filename = `slide_${i.toString().padStart(3, '0')}.png`;
                 
                 const slideData = await this.renderSingleSlide(
                     browser, 
                     matchedMeme.meme.url, 
-                    filename,
-                    animation,
-                    this.calculateSlideDuration(matchedMeme)
+                    filename
                 );
                 
                 slides.push({
@@ -124,15 +117,13 @@ class SlideRenderer {
     }
 
     /**
-     * Render a single slide with animation
+     * Render a single slide (no animations)
      * @param {Browser} browser - Puppeteer browser instance
      * @param {string} memeUrl - URL of the meme image
      * @param {string} filename - Output filename
-     * @param {string} animation - CSS animation class
-     * @param {number} duration - Animation duration in ms
      * @returns {Object} - Slide data object
      */
-    async renderSingleSlide(browser, memeUrl, filename, animation, duration) {
+    async renderSingleSlide(browser, memeUrl, filename) {
         const page = await browser.newPage();
         
         try {
@@ -143,12 +134,11 @@ class SlideRenderer {
             const templateUrl = `file://${this.templatePath}`;
             await page.goto(templateUrl, { waitUntil: 'networkidle2' });
             
-            // Inject meme image and animation
-            await page.evaluate((memeUrl, animation) => {
+            // Inject meme image
+            await page.evaluate((memeUrl) => {
                 const img = document.getElementById('meme-image');
                 img.src = memeUrl;
-                img.className = `meme-image ${animation}`;
-            }, memeUrl, animation);
+            }, memeUrl);
             
             // Wait for image to load
             await page.waitForFunction(() => {
@@ -156,8 +146,8 @@ class SlideRenderer {
                 return img.complete && img.naturalHeight !== 0;
             }, { timeout: 10000 });
             
-            // Wait for animation to play
-            await page.waitForTimeout(duration);
+            // Small delay to ensure rendering is complete
+            await page.waitForTimeout(500);
             
             // Capture screenshot
             const outputPath = path.join(this.slidesDir, filename);
@@ -172,9 +162,7 @@ class SlideRenderer {
             return {
                 filename,
                 path: outputPath,
-                memeUrl,
-                animation,
-                duration
+                memeUrl
             };
             
         } catch (error) {
@@ -183,29 +171,6 @@ class SlideRenderer {
         } finally {
             await page.close();
         }
-    }
-
-    /**
-     * Calculate slide duration based on lyric timing
-     * @param {Object} matchedMeme - Matched meme object with timing info
-     * @returns {number} - Duration in milliseconds
-     */
-    calculateSlideDuration(matchedMeme) {
-        if (matchedMeme.start !== undefined && matchedMeme.end !== undefined) {
-            const lyricDuration = (matchedMeme.end - matchedMeme.start) * 1000;
-            // Use lyric duration but cap at max slide duration
-            return Math.min(lyricDuration, this.slideDuration);
-        }
-        
-        return this.slideDuration;
-    }
-
-    /**
-     * Get a random animation class
-     * @returns {string} - Animation CSS class name
-     */
-    getRandomAnimation() {
-        return this.animations[Math.floor(Math.random() * this.animations.length)];
     }
 
     /**
@@ -221,114 +186,6 @@ class SlideRenderer {
         } catch (error) {
             Logger.warn('Failed to cleanup slides directory:', error.message);
         }
-    }
-
-    /**
-     * Render slides as video frames for smoother animation
-     * @param {Array} matchedMemes - Array of matched meme objects
-     * @param {number} fps - Frames per second
-     * @returns {Array} - Array of frame file paths
-     */
-    async renderAnimatedFrames(matchedMemes, fps = 30) {
-        await this.initialize();
-        
-        Logger.info(`Rendering animated frames at ${fps} FPS...`);
-        
-        const browser = await puppeteer.launch({
-            headless: true,
-            executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-            args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-gpu']
-        });
-
-        try {
-            const frames = [];
-            
-            for (let i = 0; i < matchedMemes.length; i++) {
-                const matchedMeme = matchedMemes[i];
-                const animation = this.getRandomAnimation();
-                const slideDuration = this.calculateSlideDuration(matchedMeme);
-                const frameCount = Math.ceil((slideDuration / 1000) * fps);
-                
-                const slideFrames = await this.renderSlideFrames(
-                    browser,
-                    matchedMeme.meme.url,
-                    animation,
-                    frameCount,
-                    i
-                );
-                
-                frames.push(...slideFrames);
-            }
-            
-            Logger.success(`Rendered ${frames.length} animation frames`);
-            return frames;
-            
-        } catch (error) {
-            Logger.error('Failed to render animated frames:', error);
-            throw error;
-        } finally {
-            await browser.close();
-        }
-    }
-
-    /**
-     * Render multiple frames for a single slide animation
-     * @param {Browser} browser - Puppeteer browser instance
-     * @param {string} memeUrl - Meme image URL
-     * @param {string} animation - Animation class
-     * @param {number} frameCount - Number of frames to render
-     * @param {number} slideIndex - Index of the slide
-     * @returns {Array} - Array of frame file paths
-     */
-    async renderSlideFrames(browser, memeUrl, animation, frameCount, slideIndex) {
-        const page = await browser.newPage();
-        const frames = [];
-        
-        try {
-            await page.setViewport({ width: 1920, height: 1080 });
-            
-            const templateUrl = `file://${this.templatePath}`;
-            await page.goto(templateUrl, { waitUntil: 'networkidle2' });
-            
-            // Setup the slide
-            await page.evaluate((memeUrl, animation) => {
-                const img = document.getElementById('meme-image');
-                img.src = memeUrl;
-                img.className = `meme-image ${animation}`;
-            }, memeUrl, animation);
-            
-            await page.waitForFunction(() => {
-                const img = document.getElementById('meme-image');
-                return img.complete && img.naturalHeight !== 0;
-            }, { timeout: 10000 });
-            
-            // Capture frames throughout the animation
-            for (let frame = 0; frame < frameCount; frame++) {
-                const filename = `slide_${slideIndex.toString().padStart(3, '0')}_frame_${frame.toString().padStart(3, '0')}.png`;
-                const outputPath = path.join(this.slidesDir, filename);
-                
-                await page.screenshot({
-                    path: outputPath,
-                    type: 'png',
-                    fullPage: false
-                });
-                
-                frames.push({
-                    filename,
-                    path: outputPath,
-                    slideIndex,
-                    frameIndex: frame
-                });
-                
-                // Wait between frames
-                await page.waitForTimeout(1000 / 30); // 30 FPS timing
-            }
-            
-        } finally {
-            await page.close();
-        }
-        
-        return frames;
     }
 }
 

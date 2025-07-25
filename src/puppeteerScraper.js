@@ -137,8 +137,8 @@ class PuppeteerScraper {
                     
                     // Rate limiting delay between searches
                     if (i < keywords.length - 1) {
-                        Logger.debug(`⏱️  Waiting 2 seconds before next search...`);
-                        await page.waitForTimeout(2000);
+                        Logger.debug(`⏱️  Waiting 1 seconds before next search...`);
+                        await page.waitForTimeout(1000);
                     }
                     
                 } catch (error) {
