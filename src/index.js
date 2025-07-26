@@ -109,9 +109,17 @@ class MemeVideoGenerator {
                 Logger.debug(`${index + 1}. "${item.keyword}" → ${item.meme.url.substring(0, 60)}...`);
             });
 
+            // Step 4.5: Split long segments into multiple memes
+            Logger.info('⏱️  Checking for long segments that need multiple memes...');
+            const expandedMemes = await this.expandLongSegments(matchedMemes);
+            
+            if (expandedMemes.length > matchedMemes.length) {
+                Logger.info(`📈 Expanded ${matchedMemes.length} segments to ${expandedMemes.length} meme slots for better coverage`);
+            }
+
             // Step 5: Render slides
             Logger.info('🖼️  Step 5/6: Rendering slides...');
-            const slides = await this.slideRenderer.renderSlides(matchedMemes, thumbnailMemeUrl);
+            const slides = await this.slideRenderer.renderSlides(expandedMemes, thumbnailMemeUrl);
 
             // Step 6: Create final video
             Logger.info('🎥 Step 6/6: Creating final video...');
@@ -211,6 +219,89 @@ class MemeVideoGenerator {
             Logger.success('✅ Cleanup completed');
         } catch (error) {
             Logger.warn('⚠️  Cleanup failed:', error.message);
+        }
+    }
+
+    /**
+     * Expand long segments (>5s) into multiple sub-segments with different memes
+     * @param {Array} matchedMemes - Array of matched meme objects with timing
+     * @returns {Array} - Expanded array with sub-segments for long durations
+     */
+    async expandLongSegments(matchedMemes) {
+        const expandedMemes = [];
+        const maxSegmentDuration = 5.0; // 5 seconds max per meme
+
+        for (const meme of matchedMemes) {
+            const duration = meme.end - meme.start;
+            
+            if (duration <= maxSegmentDuration) {
+                // Short segment - keep as is
+                expandedMemes.push(meme);
+                continue;
+            }
+
+            // Long segment - split into multiple sub-segments
+            Logger.info(`📏 Splitting long segment "${meme.keyword}" (${duration.toFixed(1)}s) into multiple memes`);
+            
+            const numSegments = Math.ceil(duration / maxSegmentDuration);
+            Logger.debug(`  Creating ${numSegments} sub-segments of ~${maxSegmentDuration}s each`);
+
+            // Get additional memes for this keyword
+            const additionalMemes = await this.getAdditionalMemesForKeyword(meme.keyword, numSegments);
+            
+            // Create sub-segments
+            for (let i = 0; i < numSegments; i++) {
+                const segmentStart = meme.start + (i * maxSegmentDuration);
+                const segmentEnd = Math.min(meme.start + ((i + 1) * maxSegmentDuration), meme.end);
+                const segmentDuration = segmentEnd - segmentStart;
+
+                // Use different meme for each segment
+                const memeUrl = additionalMemes[i] || meme.meme.url; // Fallback to original if not enough memes
+
+                expandedMemes.push({
+                    ...meme,
+                    start: segmentStart,
+                    end: segmentEnd,
+                    meme: {
+                        ...meme.meme,
+                        url: memeUrl
+                    },
+                    segmentIndex: i + 1,
+                    totalSegments: numSegments
+                });
+
+                Logger.debug(`  Segment ${i + 1}/${numSegments}: ${segmentStart.toFixed(1)}s-${segmentEnd.toFixed(1)}s (${segmentDuration.toFixed(1)}s)`);
+            }
+        }
+
+        return expandedMemes;
+    }
+
+    /**
+     * Get additional memes for a keyword to use in sub-segments
+     * @param {string} keyword - The keyword to search for
+     * @param {number} count - Number of memes needed
+     * @returns {Array} - Array of meme URLs
+     */
+    async getAdditionalMemesForKeyword(keyword, count) {
+        try {
+            Logger.debug(`🔄 Getting ${count} additional memes for "${keyword}"`);
+            
+            // Create an array with the keyword repeated for the number of memes we need
+            const keywords = Array(count).fill(keyword);
+            
+            // Search for multiple memes of the same keyword
+            const memeResults = await this.puppeteerScraper.searchMemesForKeywords(keywords);
+            
+            // Extract just the URLs
+            const urls = memeResults.map(result => result.memeUrl);
+            
+            Logger.debug(`✅ Found ${urls.length} additional memes for "${keyword}"`);
+            return urls;
+            
+        } catch (error) {
+            Logger.warn(`⚠️ Failed to get additional memes for "${keyword}": ${error.message}`);
+            return []; // Return empty array, will fall back to original meme
         }
     }
 }
