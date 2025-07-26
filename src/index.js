@@ -230,6 +230,7 @@ class MemeVideoGenerator {
     async expandLongSegments(matchedMemes) {
         const expandedMemes = [];
         const maxSegmentDuration = 5.0; // 5 seconds max per meme
+        const minSegmentDuration = 3.0; // 3 seconds minimum per meme
 
         for (const meme of matchedMemes) {
             const duration = meme.end - meme.start;
@@ -243,8 +244,20 @@ class MemeVideoGenerator {
             // Long segment - split into multiple sub-segments
             Logger.info(`📏 Splitting long segment "${meme.keyword}" (${duration.toFixed(1)}s) into multiple memes`);
             
-            const numSegments = Math.ceil(duration / maxSegmentDuration);
-            Logger.debug(`  Creating ${numSegments} sub-segments of ~${maxSegmentDuration}s each`);
+            // Calculate optimal number of segments ensuring last segment is >= 3s
+            let numSegments = Math.floor(duration / maxSegmentDuration);
+            const remainder = duration - (numSegments * maxSegmentDuration);
+            
+            // If remainder is too short, extend the last segment instead of creating a new one
+            if (remainder > 0 && remainder < minSegmentDuration) {
+                // Keep numSegments as is - last segment will be extended
+                Logger.debug(`  Last segment would be ${remainder.toFixed(1)}s, extending previous segment instead`);
+            } else if (remainder >= minSegmentDuration) {
+                // Remainder is long enough to be its own segment
+                numSegments += 1;
+            }
+            
+            Logger.debug(`  Creating ${numSegments} sub-segments with minimum ${minSegmentDuration}s duration`);
 
             // Get additional memes for this keyword
             const additionalMemes = await this.getAdditionalMemesForKeyword(meme.keyword, numSegments);
@@ -252,7 +265,15 @@ class MemeVideoGenerator {
             // Create sub-segments
             for (let i = 0; i < numSegments; i++) {
                 const segmentStart = meme.start + (i * maxSegmentDuration);
-                const segmentEnd = Math.min(meme.start + ((i + 1) * maxSegmentDuration), meme.end);
+                let segmentEnd;
+                
+                if (i === numSegments - 1) {
+                    // Last segment - extend to the actual end time
+                    segmentEnd = meme.end;
+                } else {
+                    segmentEnd = meme.start + ((i + 1) * maxSegmentDuration);
+                }
+                
                 const segmentDuration = segmentEnd - segmentStart;
 
                 // Use different meme for each segment
