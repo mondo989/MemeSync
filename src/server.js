@@ -196,7 +196,7 @@ async function generateVideoAsync(jobId, youtubeUrl, options) {
         
         // Wrap the generator in a timeout to prevent hanging
         const timeoutPromise = new Promise((_, reject) => {
-            setTimeout(() => reject(new Error('Generation timeout after 10 minutes')), 600000);
+            setTimeout(() => reject(new Error('Generation timeout after 10 minutes')), 6000000);
         });
         
         // Create custom logger to update progress

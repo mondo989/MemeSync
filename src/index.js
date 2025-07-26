@@ -81,11 +81,17 @@ class MemeVideoGenerator {
 
             Logger.success(`🎭 Meme search completed! Found memes for ${memeResults.length} keywords`);
             
-            // Combine keyword data with meme results
+            // Validate array lengths match
+            if (keywordData.length !== memeResults.length) {
+                throw new Error(`Mismatch: ${keywordData.length} keywords but ${memeResults.length} meme results`);
+            }
+            
+            // Combine keyword data with meme results using index-based mapping
             const matchedMemes = keywordData.map((item, index) => {
-                const memeResult = memeResults.find(result => result.keyword === item.keyword);
+                // Use index-based mapping instead of keyword matching to ensure unique memes
+                const memeResult = memeResults[index];
                 if (!memeResult) {
-                    throw new Error(`No meme found for keyword: ${item.keyword}`);
+                    throw new Error(`No meme found at index ${index} for keyword: ${item.keyword}`);
                 }
                 return {
                     ...item,

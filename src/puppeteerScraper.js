@@ -78,6 +78,7 @@ class PuppeteerScraper {
         }
 
         const results = [];
+        const selectedUrls = []; // Track selected URLs to avoid duplicates
 
         try {
             Logger.debug('🔧 Creating new browser page...');
@@ -146,12 +147,35 @@ class PuppeteerScraper {
                         await page.waitForTimeout(500); // Brief wait for page to stabilize
                     }
                     
-                    const memeUrl = await this.searchSingleKeyword(page, keyword);
+                    // Search for a unique meme URL with retry logic to avoid duplicates
+                    let memeUrl;
+                    let retryCount = 0;
+                    const maxRetries = 5; // Prevent infinite loops
+                    
+                    do {
+                        memeUrl = await this.searchSingleKeyword(page, keyword, selectedUrls);
+                        retryCount++;
+                        
+                        if (selectedUrls.includes(memeUrl)) {
+                            Logger.debug(`🔄 Duplicate URL found for "${keyword}" (attempt ${retryCount}/${maxRetries}), retrying...`);
+                            if (retryCount >= maxRetries) {
+                                Logger.warn(`⚠️ Max retries reached for "${keyword}", accepting duplicate URL`);
+                                break;
+                            }
+                        }
+                    } while (selectedUrls.includes(memeUrl) && retryCount < maxRetries);
+                    
+                    // Add to selected URLs array and results
+                    selectedUrls.push(memeUrl);
                     results.push({
                         keyword: keyword,
                         memeUrl: memeUrl
                     });
-                    Logger.success(`✅ Found meme for "${keyword}": ${memeUrl.substring(0, 60)}...`);
+                    
+                    Logger.success(`✅ Found unique meme for "${keyword}": ${memeUrl.substring(0, 60)}...`);
+                    if (retryCount > 1) {
+                        Logger.info(`🎯 Required ${retryCount} attempts to find unique meme`);
+                    }
                     
                     // Rate limiting delay between searches to ensure proper loading
                     if (i < keywords.length - 1) {
@@ -178,6 +202,7 @@ class PuppeteerScraper {
             
             Logger.success(`🎉 Optimized meme search completed! Found ${results.length} memes using single browser instance`);
             Logger.info(`⚡ Efficiency gains: Reused page instance for all ${keywords.length} searches`);
+            Logger.info(`🔒 Duplicate prevention: ${selectedUrls.length} unique URLs selected`);
             return results;
             
         } catch (error) {
@@ -202,9 +227,10 @@ class PuppeteerScraper {
      * Search for a single keyword and return a random meme URL
      * @param {Page} page - Puppeteer page object
      * @param {string} keyword - Keyword to search for
+     * @param {Array} selectedUrls - Array of already selected URLs to avoid duplicates
      * @returns {string} - Meme image URL
      */
-    async searchSingleKeyword(page, keyword) {
+    async searchSingleKeyword(page, keyword, selectedUrls = []) {
         try {
             Logger.debug(`🔍 Searching single keyword: "${keyword}"`);
             
@@ -369,11 +395,22 @@ class PuppeteerScraper {
                 throw new Error(`No memes found for keyword: "${keyword}"`);
             }
             
-            // Randomly select one meme URL
-            const randomIndex = Math.floor(Math.random() * memeUrls.length);
-            const selectedUrl = memeUrls[randomIndex];
+            // Filter out already selected URLs to prioritize unique selections
+            const uniqueUrls = memeUrls.filter(url => !selectedUrls.includes(url));
             
-            Logger.debug(`🎲 Random selection: ${randomIndex + 1}/${memeUrls.length} - ${selectedUrl.substring(0, 50)}...`);
+            // Use unique URLs if available, otherwise fall back to all URLs
+            const urlsToChooseFrom = uniqueUrls.length > 0 ? uniqueUrls : memeUrls;
+            
+            // Randomly select one meme URL
+            const randomIndex = Math.floor(Math.random() * urlsToChooseFrom.length);
+            const selectedUrl = urlsToChooseFrom[randomIndex];
+            
+            if (uniqueUrls.length > 0) {
+                Logger.debug(`🎲 Random selection from ${uniqueUrls.length} unique URLs: ${randomIndex + 1}/${uniqueUrls.length} - ${selectedUrl.substring(0, 50)}...`);
+            } else {
+                Logger.debug(`🎲 Random selection from ${memeUrls.length} total URLs (no unique options): ${randomIndex + 1}/${memeUrls.length} - ${selectedUrl.substring(0, 50)}...`);
+            }
+            
             return selectedUrl;
             
         } catch (error) {

@@ -12,3 +12,4 @@ You are an elite software architect and world class product designer building a 
 - IT's ok to ask questions if you are unsure. 
 - NEVER USE ANYTHING FALLBACK UNLESS EXPLICITLY REQUESTED
 - Nothing should be hardcoded unless confirmed first.
+- NEVER CREATE FALLBACKS UNLESS EXPLICITLY ASKED
