@@ -97,7 +97,7 @@ class VideoRenderer {
             
             const output = await youtubedl(youtubeUrl, {
                 extractAudio: true,
-                audioFormat: 'wav',  // Use WAV instead of MP3 for better compatibility
+                audioFormat: 'm4a',  // Use m4a format like original
                 audioQuality: '0',   // Best quality
                 output: tempAudioPath,
                 noPlaylist: true,
@@ -204,9 +204,10 @@ class VideoRenderer {
      * Create video from slides and audio
      * @param {Array} slides - Array of slide objects with timing info
      * @param {string} audioPath - Path to audio file
+     * @param {string} database - Database type ('apu', 'bobo', 'other') for opening slide selection
      * @returns {Promise<string>} - Path to output video
      */
-    async createVideo(slides, audioPath = null) {
+    async createVideo(slides, audioPath = null, database = 'apu') {
         await this.initialize();
 
         const finalAudioPath = audioPath || this.audioPath;
@@ -224,7 +225,7 @@ class VideoRenderer {
                 const duration = slide.endTime - slide.startTime;
                 Logger.info(`  ${index + 1}. ${slide.startTime.toFixed(1)}s-${slide.endTime.toFixed(1)}s (${duration.toFixed(1)}s)`);
             });
-            await this.createTimedSlideshow(slides, finalAudioPath);
+            await this.createTimedSlideshow(slides, finalAudioPath, database);
             
             Logger.success(`Video created successfully: ${this.outputPath}`);
             return this.outputPath;
@@ -361,8 +362,9 @@ class VideoRenderer {
      * Create timed slideshow with specific slide durations based on lyrics timing
      * @param {Array} slides - Array of slide objects with startTime/endTime
      * @param {string} audioPath - Path to audio file
+     * @param {string} database - Database type ('apu', 'bobo', 'other') for opening slide selection
      */
-    async createTimedSlideshow(slides, audioPath) {
+    async createTimedSlideshow(slides, audioPath, database = 'apu') {
         Logger.info(`Creating precisely timed slideshow with ${slides.length} slides`);
         
         // Log exact timing for each slide  
@@ -389,7 +391,7 @@ class VideoRenderer {
             Logger.info('🐍 Using MoviePy for precise video rendering...');
             
             // Call MoviePy renderer
-            await this.renderWithMoviePy(slidesDataPath, audioPath);
+            await this.renderWithMoviePy(slidesDataPath, audioPath, database);
             
             // Clean up temp files
             try {
@@ -410,8 +412,9 @@ class VideoRenderer {
      * Render video using MoviePy Python script
      * @param {string} slidesDataPath - Path to slides JSON data
      * @param {string} audioPath - Path to audio file
+     * @param {string} database - Database type ('apu', 'bobo', 'other') for opening slide selection
      */
-    async renderWithMoviePy(slidesDataPath, audioPath) {
+    async renderWithMoviePy(slidesDataPath, audioPath, database = 'apu') {
         return new Promise((resolve, reject) => {
             const { spawn } = require('child_process');
             
@@ -428,7 +431,8 @@ class VideoRenderer {
                 pythonScript,
                 '--slides', slidesDataPath,
                 '--audio', audioPath,
-                '--output', this.outputPath
+                '--output', this.outputPath,
+                '--database', database
             ], {
                 stdio: ['pipe', 'pipe', 'pipe']
             });

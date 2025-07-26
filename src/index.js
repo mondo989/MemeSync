@@ -77,7 +77,7 @@ class MemeVideoGenerator {
                         // Step 5: Search for memes dynamically using Puppeteer
             Logger.info('🎭 Step 4/6: Searching for memes...');
             const keywords = keywordData.map(item => item.keyword);
-            const memeResults = await this.puppeteerScraper.searchMemesForKeywords(keywords);
+            const memeResults = await this.puppeteerScraper.searchMemesForKeywords(keywords, options.database || 'apu');
 
             Logger.success(`🎭 Meme search completed! Found memes for ${memeResults.length} keywords`);
             
@@ -111,7 +111,7 @@ class MemeVideoGenerator {
 
             // Step 4.5: Split long segments into multiple memes
             Logger.info('⏱️  Checking for long segments that need multiple memes...');
-            const expandedMemes = await this.expandLongSegments(matchedMemes);
+            const expandedMemes = await this.expandLongSegments(matchedMemes, options.database || 'apu');
             
             if (expandedMemes.length > matchedMemes.length) {
                 Logger.info(`📈 Expanded ${matchedMemes.length} segments to ${expandedMemes.length} meme slots for better coverage`);
@@ -119,11 +119,11 @@ class MemeVideoGenerator {
 
             // Step 5: Render slides
             Logger.info('🖼️  Step 5/6: Rendering slides...');
-            const slides = await this.slideRenderer.renderSlides(expandedMemes, thumbnailMemeUrl);
+            const slides = await this.slideRenderer.renderSlides(expandedMemes, thumbnailMemeUrl, options.database || 'apu');
 
             // Step 6: Create final video
             Logger.info('🎥 Step 6/6: Creating final video...');
-            const outputPath = await this.videoRenderer.createVideo(slides, audioPath);
+            const outputPath = await this.videoRenderer.createVideo(slides, audioPath, options.database || 'apu');
 
             // Get video info
             const videoInfo = await this.videoRenderer.getVideoInfo(outputPath);
@@ -225,9 +225,10 @@ class MemeVideoGenerator {
     /**
      * Expand long segments (>5s) into multiple sub-segments with different memes
      * @param {Array} matchedMemes - Array of matched meme objects with timing
+     * @param {string} database - Database to search ('apu', 'bobo', 'other')
      * @returns {Array} - Expanded array with sub-segments for long durations
      */
-    async expandLongSegments(matchedMemes) {
+    async expandLongSegments(matchedMemes, database = 'apu') {
         const expandedMemes = [];
         const maxSegmentDuration = 5.0; // 5 seconds max per meme
         const minSegmentDuration = 3.0; // 3 seconds minimum per meme
@@ -260,7 +261,7 @@ class MemeVideoGenerator {
             Logger.debug(`  Creating ${numSegments} sub-segments with minimum ${minSegmentDuration}s duration`);
 
             // Get additional memes for this keyword
-            const additionalMemes = await this.getAdditionalMemesForKeyword(meme.keyword, numSegments);
+            const additionalMemes = await this.getAdditionalMemesForKeyword(meme.keyword, numSegments, database);
             
             // Create sub-segments
             for (let i = 0; i < numSegments; i++) {
@@ -302,9 +303,10 @@ class MemeVideoGenerator {
      * Get additional memes for a keyword to use in sub-segments
      * @param {string} keyword - The keyword to search for
      * @param {number} count - Number of memes needed
+     * @param {string} database - Database to search ('apu', 'bobo', 'other')
      * @returns {Array} - Array of meme URLs
      */
-    async getAdditionalMemesForKeyword(keyword, count) {
+    async getAdditionalMemesForKeyword(keyword, count, database = 'apu') {
         try {
             Logger.debug(`🔄 Getting ${count} additional memes for "${keyword}"`);
             
@@ -312,7 +314,7 @@ class MemeVideoGenerator {
             const keywords = Array(count).fill(keyword);
             
             // Search for multiple memes of the same keyword
-            const memeResults = await this.puppeteerScraper.searchMemesForKeywords(keywords);
+            const memeResults = await this.puppeteerScraper.searchMemesForKeywords(keywords, database);
             
             // Extract just the URLs
             const urls = memeResults.map(result => result.memeUrl);

@@ -90,6 +90,53 @@
             gap: 16px;
         }
 
+        .radio-group {
+            display: flex;
+            gap: 16px;
+            margin-top: 8px;
+        }
+
+        .radio-option {
+            flex: 1;
+            display: flex;
+            align-items: center;
+            padding: 12px 16px;
+            background: #f7fafc;
+            border: 2px solid #e2e8f0;
+            border-radius: 12px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            font-weight: normal;
+            text-transform: none;
+            letter-spacing: normal;
+        }
+
+        .radio-option:hover {
+            background: #edf2f7;
+            border-color: #cbd5e0;
+        }
+
+        .radio-option input[type="radio"] {
+            margin-right: 8px;
+            accent-color: #667eea;
+        }
+
+        .radio-option input[type="radio"]:checked + .radio-label {
+            font-weight: 600;
+            color: #667eea;
+        }
+
+        .radio-option:has(input[type="radio"]:checked) {
+            background: rgba(102, 126, 234, 0.1);
+            border-color: #667eea;
+        }
+
+        .radio-label {
+            font-size: 0.95rem;
+            color: #4a5568;
+            transition: all 0.3s ease;
+        }
+
         .button {
             width: 100%;
             padding: 16px;
@@ -220,6 +267,15 @@
             .time-inputs {
                 grid-template-columns: 1fr;
             }
+
+            .radio-group {
+                flex-direction: column;
+                gap: 8px;
+            }
+
+            .radio-option {
+                padding: 10px 12px;
+            }
         }
     </style>
 </head>
@@ -241,6 +297,24 @@
                     value="https://www.youtube.com/watch?v=-1iF8CJGOZ0&list=RD-1iF8CJGOZ0&start_radio=1"
                     required
                 >
+            </div>
+
+            <div class="form-group">
+                <label>Meme Database</label>
+                <div class="radio-group">
+                    <label class="radio-option">
+                        <input type="radio" name="database" value="apu" checked>
+                        <span class="radio-label">🐸 Apu</span>
+                    </label>
+                    <label class="radio-option">
+                        <input type="radio" name="database" value="bobo">
+                        <span class="radio-label">🐻 Bobo</span>
+                    </label>
+                    <label class="radio-option">
+                        <input type="radio" name="database" value="other">
+                        <span class="radio-label">🎭 Other</span>
+                    </label>
+                </div>
             </div>
 
             <div class="form-group">
@@ -322,7 +396,8 @@
             const data = {
                 youtubeUrl: formData.get('youtubeUrl'),
                 startTime: formData.get('startTime') || null,
-                endTime: formData.get('endTime') || null
+                endTime: formData.get('endTime') || null,
+                database: formData.get('database') || 'apu'
             };
 
             // Validate YouTube URL

@@ -26,9 +26,10 @@ class SlideRenderer {
      * Render all slides for the matched memes
      * @param {Array} matchedMemes - Array of {start, end, text, keyword, meme} objects
      * @param {string} thumbnailMemeUrl - Optional thumbnail meme URL for intro slide
+     * @param {string} database - Database type ('apu', 'bobo', 'other') for styling
      * @returns {Array} - Array of slide file paths
      */
-    async renderSlides(matchedMemes, thumbnailMemeUrl = null) {
+    async renderSlides(matchedMemes, thumbnailMemeUrl = null, database = 'apu') {
         await this.initialize();
         
         Logger.info(`Rendering ${matchedMemes.length} slides...`);
@@ -76,7 +77,8 @@ class SlideRenderer {
                 const thumbnailSlide = await this.renderSingleSlide(
                     browser, 
                     thumbnailMemeUrl, 
-                    'thumbnail_slide.png'
+                    'thumbnail_slide.png',
+                    database
                 );
                 slides.push(thumbnailSlide);
             }
@@ -89,7 +91,8 @@ class SlideRenderer {
                 const slideData = await this.renderSingleSlide(
                     browser, 
                     matchedMeme.meme.url, 
-                    filename
+                    filename,
+                    database
                 );
                 
                 slides.push({
@@ -121,9 +124,10 @@ class SlideRenderer {
      * @param {Browser} browser - Puppeteer browser instance
      * @param {string} memeUrl - URL of the meme image
      * @param {string} filename - Output filename
+     * @param {string} database - Database type ('apu', 'bobo', 'other') for styling
      * @returns {Object} - Slide data object
      */
-    async renderSingleSlide(browser, memeUrl, filename) {
+    async renderSingleSlide(browser, memeUrl, filename, database = 'apu') {
         const page = await browser.newPage();
         
         try {
@@ -134,16 +138,45 @@ class SlideRenderer {
             const templateUrl = `file://${this.templatePath}`;
             await page.goto(templateUrl, { waitUntil: 'networkidle2' });
             
+            // Inject database-specific background color
+            await page.evaluate((database) => {
+                let backgroundColor;
+                switch (database.toLowerCase()) {
+                    case 'apu':
+                        // Keep existing Apu gradient
+                        backgroundColor = 'radial-gradient(64.01% 64.01% at 50% 50%, rgba(93, 143, 54, 0.9) 0%, rgba(0, 0, 0, 0.5) 83.17%), #000000';
+                        break;
+                    case 'bobo':
+                        backgroundColor = '#be0129';
+                        break;
+                    case 'other':
+                        backgroundColor = '#000000';
+                        break;
+                    default:
+                        backgroundColor = 'radial-gradient(64.01% 64.01% at 50% 50%, rgba(93, 143, 54, 0.9) 0%, rgba(0, 0, 0, 0.5) 83.17%), #000000';
+                }
+                document.body.style.background = backgroundColor;
+            }, database);
+            
             // Inject meme image
             await page.evaluate((memeUrl) => {
                 const img = document.getElementById('meme-image');
                 img.src = memeUrl;
             }, memeUrl);
             
-            // Handle apu-logo overlay
-            const logoPath = path.join(this.slidesDir, 'apu-logo.svg');
-            const isApuSlide = filename.includes('apu-slide') || memeUrl.includes('apu-slide.png');
-            const shouldShowLogo = !isApuSlide && await this.fileExists(logoPath);
+            // Handle database-specific logo overlay (original logic but database-aware)
+            let logoPath, slideName;
+            
+            if (database.toLowerCase() === 'bobo') {
+                logoPath = path.join(this.slidesDir, 'bobo-logo.png');
+                slideName = 'bobo-slide';
+            } else { // default to 'apu' (including 'other')
+                logoPath = path.join(this.slidesDir, 'apu-logo.svg');
+                slideName = 'apu-slide';
+            }
+            
+            const isSpecialSlide = filename.includes(slideName) || memeUrl.includes(`${slideName}.png`);
+            const shouldShowLogo = !isSpecialSlide && await this.fileExists(logoPath);
             
             if (shouldShowLogo) {
                 await page.evaluate((logoPath) => {
@@ -152,9 +185,9 @@ class SlideRenderer {
                     logoImg.classList.remove('hidden');
                 }, logoPath);
                 
-                Logger.debug(`Added apu-logo overlay to slide: ${filename}`);
+                Logger.debug(`Added ${database} logo overlay to slide: ${filename}`);
             } else {
-                Logger.debug(`Skipping apu-logo overlay for: ${filename} (${isApuSlide ? 'apu-slide detected' : 'logo file not found'})`);
+                Logger.debug(`Skipping ${database} logo overlay for: ${filename} (${isSpecialSlide ? `${slideName} detected` : 'logo file not found'})`);
             }
             
             // Wait for images to load

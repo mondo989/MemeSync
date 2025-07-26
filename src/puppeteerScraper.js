@@ -6,22 +6,43 @@ const Logger = require('./utils/logger');
 class PuppeteerScraper {
     constructor() {
         this.memesSiteUrl = process.env.MEME_SITE_URL;
+        this.boboSiteUrl = process.env.BOBO_SITE_URL;
         this.outputFile = path.join(__dirname, '../memes.json');
     }
 
     /**
      * Search for memes dynamically based on keywords from lyrics
      * @param {Array} keywords - Array of keyword strings to search for
+     * @param {string} database - Database to search ('apu', 'bobo', 'other')
      * @returns {Array} - Array of {keyword, memeUrl} objects
      */
-    async searchMemesForKeywords(keywords) {
+    async searchMemesForKeywords(keywords, database = 'apu') {
+        // Validate database and get appropriate URL
+        let siteUrl;
+        switch (database.toLowerCase()) {
+            case 'apu':
         if (!this.memesSiteUrl) {
             Logger.error('MEME_SITE_URL not configured in environment variables');
             throw new Error('MEME_SITE_URL required');
         }
+                siteUrl = this.memesSiteUrl;
+                break;
+            case 'bobo':
+                if (!this.boboSiteUrl) {
+                    Logger.error('BOBO_SITE_URL not configured in environment variables');
+                    throw new Error('BOBO_SITE_URL required');
+                }
+                siteUrl = this.boboSiteUrl;
+                break;
+            case 'other':
+                throw new Error('Other database not implemented yet');
+            default:
+                throw new Error(`Unknown database: ${database}`);
+        }
 
-        Logger.info(`🎭 Starting isolated meme search for ${keywords.length} keywords`);
-        Logger.debug(`Meme site URL: ${this.memesSiteUrl}`);
+        Logger.info(`🎭 Starting isolated meme search for ${keywords.length} keywords using ${database.toUpperCase()} database`);
+        Logger.info(`🌐 Meme site URL: ${siteUrl}`);
+        Logger.info(`📋 Environment check - MEME_SITE_URL: ${this.memesSiteUrl ? 'SET' : 'NOT SET'}, BOBO_SITE_URL: ${this.boboSiteUrl ? 'SET' : 'NOT SET'}`);
         Logger.info('🔄 Using separate browser instances for complete isolation between searches');
         
         const results = [];
@@ -39,7 +60,7 @@ class PuppeteerScraper {
                 const maxRetries = 5; // Prevent infinite loops
                 
                 do {
-                    memeUrl = await this.searchSingleKeywordIsolated(keyword, selectedUrls);
+                    memeUrl = await this.searchSingleKeywordIsolated(keyword, selectedUrls, database, siteUrl);
                     retryCount++;
                     
                     if (selectedUrls.includes(memeUrl)) {
@@ -85,63 +106,72 @@ class PuppeteerScraper {
      * Search for a single keyword using an isolated browser instance
      * @param {string} keyword - Keyword to search for
      * @param {Array} selectedUrls - Array of already selected URLs to avoid duplicates
+     * @param {string} database - Database to search ('apu', 'bobo', 'other')
+     * @param {string} siteUrl - URL of the meme site
      * @returns {string} - Meme image URL
      */
-    async searchSingleKeywordIsolated(keyword, selectedUrls = []) {
+    async searchSingleKeywordIsolated(keyword, selectedUrls = [], database = 'apu', siteUrl = null) {
         let browser = null;
         
         try {
             Logger.debug(`🚀 Launching isolated browser for "${keyword}"...`);
             
             // Try multiple launch configurations for stability
-            const launchConfigs = [
-                {
-                    headless: 'new',
-                    executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-                    args: [
-                        '--no-sandbox',
-                        '--disable-setuid-sandbox',
-                        '--disable-dev-shm-usage',
-                        '--disable-gpu',
-                        '--disable-web-security',
+        const launchConfigs = [
+            {
+                headless: 'new',
+                executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+                args: [
+                    '--no-sandbox',
+                    '--disable-setuid-sandbox',
+                    '--disable-dev-shm-usage',
+                    '--disable-gpu',
+                    '--disable-web-security',
                         '--remote-debugging-port=0'
-                    ],
-                    timeout: 10000
-                },
-                {
-                    headless: 'new',
+                ],
+                timeout: 10000
+            },
+            {
+                headless: 'new',
                     args: ['--no-sandbox', '--disable-setuid-sandbox', '--remote-debugging-port=0'],
-                    timeout: 10000
-                }
-            ];
+                timeout: 10000
+            }
+        ];
 
-            let lastError = null;
+        let lastError = null;
             for (const config of launchConfigs) {
-                try {
+            try {
                     browser = await puppeteer.launch(config);
-                    break;
-                } catch (configError) {
-                    lastError = configError;
-                    if (browser) {
-                        try { await browser.close(); } catch {}
-                        browser = null;
-                    }
+                break;
+            } catch (configError) {
+                lastError = configError;
+                if (browser) {
+                    try { await browser.close(); } catch {}
+                    browser = null;
                 }
             }
+        }
 
-            if (!browser) {
-                throw new Error(`Browser launch failed: ${lastError?.message || 'Unknown error'}`);
-            }
+        if (!browser) {
+            throw new Error(`Browser launch failed: ${lastError?.message || 'Unknown error'}`);
+        }
 
             const page = await browser.newPage();
             await page.setUserAgent('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
             await page.setViewport({ width: 1280, height: 720 });
-
-            // Navigate to memes site
-            await page.goto(this.memesSiteUrl, { waitUntil: 'domcontentloaded', timeout: 10000 });
             
-            // Perform the search using the existing logic
-            return await this.searchSingleKeyword(page, keyword, selectedUrls);
+            // Navigate to memes site
+            const targetUrl = siteUrl || this.memesSiteUrl;
+            await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 10000 });
+            
+            // Perform the search using database-specific logic
+            if (database === 'bobo') {
+                Logger.info(`🐻 Using BOBO search method for "${keyword}"`);
+                return await this.searchSingleKeywordBobo(page, keyword, selectedUrls);
+            } else {
+                Logger.info(`🐸 Using APU search method for "${keyword}"`);
+                return await this.searchSingleKeyword(page, keyword, selectedUrls);
+            }
             
         } finally {
             if (browser) {
@@ -152,6 +182,232 @@ class PuppeteerScraper {
                     Logger.warn(`⚠️ Error closing browser for "${keyword}":`, closeError.message);
                 }
             }
+        }
+    }
+
+    /**
+     * Search for a single keyword on Bobo database and return a random meme URL
+     * @param {Page} page - Puppeteer page object
+     * @param {string} keyword - Keyword to search for
+     * @param {Array} selectedUrls - Array of already selected URLs to avoid duplicates
+     * @returns {string} - Meme image URL
+     */
+    async searchSingleKeywordBobo(page, keyword, selectedUrls = []) {
+        try {
+            Logger.debug(`🔍 Searching Bobo database for keyword: "${keyword}"`);
+            
+            // First, let's check if the page loaded correctly
+            Logger.debug('📄 Checking page status...');
+            const title = await page.title();
+            const url = page.url();
+            Logger.info(`📋 Page loaded - Title: "${title}", URL: ${url}`);
+            
+            // Check what elements are available on the page
+            const availableElements = await page.evaluate(() => {
+                const searchBtn = document.querySelector('#search-btn');
+                const searchInput = document.querySelector('#search-input');
+                const body = document.body;
+                return {
+                    hasSearchBtn: !!searchBtn,
+                    hasSearchInput: !!searchInput,
+                    searchBtnVisible: searchBtn ? !searchBtn.hidden : false,
+                    searchInputVisible: searchInput ? !searchInput.hidden : false,
+                    bodyContent: body ? body.innerHTML.substring(0, 500) : 'No body',
+                    allIds: Array.from(document.querySelectorAll('[id]')).map(el => el.id).slice(0, 10)
+                };
+            });
+            Logger.info(`🔍 Element check:`, availableElements);
+            
+            // Click search button first
+            Logger.debug('🎯 Clicking search button...');
+            
+            try {
+                await page.waitForSelector('#search-btn', { timeout: 5000 });
+                await page.click('#search-btn');
+                Logger.debug('✅ Search button clicked successfully');
+                
+                // Wait for search input to become visible/available after clicking search button
+                Logger.debug('⏳ Waiting for search input to become available...');
+                await page.waitForTimeout(3000); // Give UI time to transition
+                
+                // Check what elements are now available after clicking search button
+                const postClickElements = await page.evaluate(() => {
+                    const searchContainer = document.querySelector('#search-container');
+                    const searchForm = document.querySelector('#search-form');
+                    const searchInput = document.querySelector('#search-input');
+                    const body = document.body;
+                    
+                    return {
+                        searchContainer: searchContainer ? {
+                            visible: !searchContainer.hidden,
+                            display: window.getComputedStyle(searchContainer).display,
+                            innerHTML: searchContainer.innerHTML.substring(0, 300)
+                        } : null,
+                        searchForm: searchForm ? {
+                            visible: !searchForm.hidden,
+                            display: window.getComputedStyle(searchForm).display,
+                            innerHTML: searchForm.innerHTML.substring(0, 300)
+                        } : null,
+                        searchInput: searchInput ? {
+                            visible: !searchInput.hidden,
+                            display: window.getComputedStyle(searchInput).display,
+                            type: searchInput.type,
+                            placeholder: searchInput.placeholder
+                        } : null,
+                        allVisibleInputs: Array.from(document.querySelectorAll('input')).map(input => ({
+                            id: input.id,
+                            type: input.type,
+                            placeholder: input.placeholder,
+                            visible: window.getComputedStyle(input).display !== 'none'
+                        }))
+                    };
+                });
+                
+                Logger.info(`🔍 Post-click element analysis:`, postClickElements);
+                
+                // If search container is hidden, make it visible
+                if (postClickElements.searchContainer && postClickElements.searchContainer.display === 'none') {
+                    Logger.info(`🔧 Search container is hidden, making it visible...`);
+                    const containerMadeVisible = await page.evaluate(() => {
+                        const searchContainer = document.querySelector('#search-container');
+                        if (searchContainer) {
+                            searchContainer.style.display = 'block';
+                            return true;
+                        }
+                        return false;
+                    });
+                    
+                    if (containerMadeVisible) {
+                        Logger.debug('✅ Search container display set to block');
+                    }
+                    
+                    // Wait a moment for the change to take effect
+                    await page.waitForTimeout(1000);
+                }
+                
+            } catch (btnError) {
+                Logger.error(`❌ Failed to click search button: ${btnError.message}`);
+                
+                // Take a screenshot for debugging
+                try {
+                    const screenshotPath = path.join(__dirname, '../media', `bobo-debug-${Date.now()}.png`);
+                    await page.screenshot({ path: screenshotPath, fullPage: true });
+                    Logger.info(`📸 Debug screenshot saved: ${screenshotPath}`);
+                } catch (screenshotError) {
+                    Logger.warn(`Failed to take debug screenshot: ${screenshotError.message}`);
+                }
+                
+                throw new Error(`Search button not found or clickable: ${btnError.message}`);
+            }
+            
+            // Wait for search input to be available and click it
+            Logger.debug('🎯 Clicking search input...');
+            
+            try {
+                // Now the search input should be available - wait for it and click it
+                await page.waitForSelector('#search-input', { visible: true, timeout: 5000 });
+                Logger.debug('✅ Search input found and visible');
+                
+                await page.click('#search-input');
+                Logger.debug('✅ Search input clicked successfully');
+                
+                // Additional check to ensure input is ready
+                await page.waitForTimeout(500);
+                
+            } catch (inputError) {
+                Logger.error(`❌ Failed to click search input: ${inputError.message}`);
+                
+                // Take a screenshot for debugging
+                try {
+                    const screenshotPath = path.join(__dirname, '../media', `bobo-input-debug-${Date.now()}.png`);
+                    await page.screenshot({ path: screenshotPath, fullPage: true });
+                    Logger.info(`📸 Input debug screenshot saved: ${screenshotPath}`);
+                } catch (screenshotError) {
+                    Logger.warn(`Failed to take input debug screenshot: ${screenshotError.message}`);
+                }
+                
+                throw new Error(`Search input not found or clickable: ${inputError.message}`);
+            }
+            
+            // Clear any existing content and type the keyword
+            Logger.debug(`⌨️ Typing keyword: "${keyword}"`);
+            
+            // Clear the input field first
+            await page.evaluate(() => {
+                const searchInput = document.querySelector('#search-input');
+                if (searchInput) {
+                    searchInput.value = '';
+                    searchInput.focus(); // Ensure focus
+                }
+            });
+                    
+            // Type the keyword
+            await page.type('#search-input', keyword, { delay: 50 }); // Add small delay between keystrokes
+            Logger.debug(`✅ Typed keyword: "${keyword}"`);
+            
+            // Press Enter to submit search
+            Logger.debug('📤 Pressing Enter to submit search...');
+            await page.keyboard.press('Enter');
+            Logger.debug('✅ Search submitted with Enter key');
+            
+            // Wait for results to load
+            Logger.debug('⏱️ Waiting for search results...');
+            await page.waitForTimeout(3000); // Give time for results to load
+            
+            // Try to wait for gallery with media items
+            try {
+                await page.waitForSelector('#gallery .media-item', { timeout: 8000 });
+            } catch (waitError) {
+                Logger.debug('Using fallback wait for results');
+                await page.waitForTimeout(2000);
+            }
+            
+            // Extract meme URLs from gallery
+            Logger.debug('🖼️ Extracting meme URLs from Bobo gallery...');
+            const memeUrls = await page.evaluate(() => {
+                const mediaItems = document.querySelectorAll('#gallery .media-item img');
+                const urls = [];
+                
+                mediaItems.forEach(img => {
+                    if (img.src && img.src.startsWith('http')) {
+                        urls.push(img.src);
+                    }
+                });
+                
+                return [...new Set(urls)]; // Remove duplicates
+            });
+            
+            Logger.debug(`📊 Found ${memeUrls.length} Bobo meme images for "${keyword}"`);
+            
+            if (memeUrls.length === 0) {
+                throw new Error(`No Bobo memes found for keyword: "${keyword}"`);
+            }
+            
+            // BOBO-SPECIFIC LOGIC: Only select from first 4 memes, allow duplicates
+            const maxMemes = 4;
+            const limitedMemes = memeUrls.slice(0, maxMemes);
+            Logger.debug(`🐻 Bobo logic: Using first ${limitedMemes.length} memes (max ${maxMemes}) from ${memeUrls.length} total results`);
+            
+            // Try to find unique URLs from the first 4, but allow duplicates if needed
+            const uniqueUrls = limitedMemes.filter(url => !selectedUrls.includes(url));
+            const urlsToChooseFrom = uniqueUrls.length > 0 ? uniqueUrls : limitedMemes;
+            
+            // Randomly select one meme URL from the limited set
+            const randomIndex = Math.floor(Math.random() * urlsToChooseFrom.length);
+            const selectedUrl = urlsToChooseFrom[randomIndex];
+            
+            if (uniqueUrls.length > 0) {
+                Logger.debug(`🎲 Bobo selection: Chose unique URL ${randomIndex + 1}/${uniqueUrls.length} from first ${maxMemes} memes`);
+            } else {
+                Logger.debug(`🎲 Bobo selection: Chose duplicate URL ${randomIndex + 1}/${limitedMemes.length} from first ${maxMemes} memes (allowing duplicates)`);
+            }
+            
+            return selectedUrl;
+            
+        } catch (error) {
+            Logger.error(`❌ Error searching Bobo database for "${keyword}": ${error.message}`);
+            Logger.debug('Detailed error:', error.stack);
+            throw error;
         }
     }
 

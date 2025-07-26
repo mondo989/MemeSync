@@ -55,12 +55,13 @@ app.get('/', (req, res) => {
 
 // Generate video endpoint
 app.post('/api/generate', async (req, res) => {
-    const { youtubeUrl, startTime, endTime, thumbnailMemeUrl } = req.body;
+    const { youtubeUrl, startTime, endTime, thumbnailMemeUrl, database } = req.body;
     
     Logger.info('🎬 New video generation request:', {
         youtubeUrl: youtubeUrl?.substring(0, 50) + '...',
         startTime,
         endTime,
+        database: database || 'apu',
         ip: req.ip
     });
     
@@ -82,7 +83,7 @@ app.post('/api/generate', async (req, res) => {
     Logger.info(`✅ Job ${jobId} created and queued for processing`);
 
     // Start generation in background
-    generateVideoAsync(jobId, youtubeUrl, { startTime, endTime, thumbnailMemeUrl });
+            generateVideoAsync(jobId, youtubeUrl, { startTime, endTime, thumbnailMemeUrl, database: database || 'apu' });
 
     res.json({ jobId, message: 'Video generation started' });
 });
