@@ -141,7 +141,7 @@ class SlideRenderer {
             }, memeUrl);
             
             // Handle apu-logo overlay
-            const logoPath = path.join(this.slidesDir, 'apu-logo.png');
+            const logoPath = path.join(this.slidesDir, 'apu-logo.svg');
             const isApuSlide = filename.includes('apu-slide') || memeUrl.includes('apu-slide.png');
             const shouldShowLogo = !isApuSlide && await this.fileExists(logoPath);
             

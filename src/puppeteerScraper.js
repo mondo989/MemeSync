@@ -20,204 +20,136 @@ class PuppeteerScraper {
             throw new Error('MEME_SITE_URL required');
         }
 
-        Logger.info(`🎭 Starting optimized meme search for ${keywords.length} keywords`);
+        Logger.info(`🎭 Starting isolated meme search for ${keywords.length} keywords`);
         Logger.debug(`Meme site URL: ${this.memesSiteUrl}`);
-        Logger.info('💡 Using single browser instance with page reuse for efficiency');
+        Logger.info('🔄 Using separate browser instances for complete isolation between searches');
         
-        let browser = null;
-        Logger.info('🚀 Launching Puppeteer browser...');
-        
-        // Try multiple launch configurations for macOS stability and port conflicts
-        const launchConfigs = [
-            // Use system Chrome (most stable) with random port to avoid conflicts
-            {
-                headless: 'new',
-                executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-                args: [
-                    '--no-sandbox',
-                    '--disable-setuid-sandbox',
-                    '--disable-dev-shm-usage',
-                    '--disable-gpu',
-                    '--disable-web-security',
-                    '--remote-debugging-port=0' // Use random available port
-                ],
-                timeout: 10000
-            },
-            // Fallback to Puppeteer's Chrome with random port
-            {
-                headless: 'new',
-                args: [
-                    '--no-sandbox', 
-                    '--disable-setuid-sandbox',
-                    '--remote-debugging-port=0'
-                ],
-                timeout: 10000
-            }
-        ];
-
-        let lastError = null;
-        for (let i = 0; i < launchConfigs.length; i++) {
-            try {
-                Logger.info(`🔄 Trying browser config ${i + 1}/${launchConfigs.length}...`);
-                browser = await puppeteer.launch(launchConfigs[i]);
-                Logger.success('✅ Browser launched successfully');
-                break;
-            } catch (configError) {
-                lastError = configError;
-                Logger.warn(`⚠️ Config ${i + 1} failed: ${configError.message}`);
-                if (browser) {
-                    try { await browser.close(); } catch {}
-                    browser = null;
-                }
-            }
-        }
-
-        if (!browser) {
-            Logger.error('❌ All browser launch configurations failed');
-            throw new Error(`Browser launch failed: ${lastError?.message || 'Unknown error'}`);
-        }
-
         const results = [];
         const selectedUrls = []; // Track selected URLs to avoid duplicates
 
-        try {
-            Logger.debug('🔧 Creating new browser page...');
-            const page = await browser.newPage();
+        // Process each keyword with its own browser instance for complete isolation
+        for (let i = 0; i < keywords.length; i++) {
+            const keyword = keywords[i];
+            Logger.info(`🔎 [${i + 1}/${keywords.length}] Searching: "${keyword}"`);
             
-            // Enhanced page setup with error handling
+            try {
+                // Search for a unique meme URL with retry logic to avoid duplicates
+                let memeUrl;
+                let retryCount = 0;
+                const maxRetries = 5; // Prevent infinite loops
+                
+                do {
+                    memeUrl = await this.searchSingleKeywordIsolated(keyword, selectedUrls);
+                    retryCount++;
+                    
+                    if (selectedUrls.includes(memeUrl)) {
+                        Logger.debug(`🔄 Duplicate URL found for "${keyword}" (attempt ${retryCount}/${maxRetries}), retrying...`);
+                        if (retryCount >= maxRetries) {
+                            Logger.warn(`⚠️ Max retries reached for "${keyword}", accepting duplicate URL`);
+                            break;
+                        }
+                    }
+                } while (selectedUrls.includes(memeUrl) && retryCount < maxRetries);
+                
+                // Add to selected URLs array and results
+                selectedUrls.push(memeUrl);
+                results.push({
+                    keyword: keyword,
+                    memeUrl: memeUrl
+                });
+                
+                Logger.success(`✅ Found unique meme for "${keyword}": ${memeUrl}`);
+                if (retryCount > 1) {
+                    Logger.info(`🎯 Required ${retryCount} attempts to find unique meme`);
+                }
+                
+                // Brief pause between searches to avoid overwhelming the server
+                if (i < keywords.length - 1) {
+                    Logger.debug(`⏱️  Brief pause before next search...`);
+                    await new Promise(resolve => setTimeout(resolve, 1000));
+                }
+                
+            } catch (error) {
+                Logger.error(`❌ Failed to search for "${keyword}": ${error.message}`);
+                Logger.debug('Error details:', error.stack);
+                throw new Error(`Meme search failed for keyword "${keyword}": ${error.message}`);
+            }
+        }
+        
+        Logger.success(`🎉 Isolated meme search completed! Found ${results.length} memes using separate browser instances`);
+        Logger.info(`🔒 Duplicate prevention: ${selectedUrls.length} unique URLs selected`);
+        return results;
+    }
+
+    /**
+     * Search for a single keyword using an isolated browser instance
+     * @param {string} keyword - Keyword to search for
+     * @param {Array} selectedUrls - Array of already selected URLs to avoid duplicates
+     * @returns {string} - Meme image URL
+     */
+    async searchSingleKeywordIsolated(keyword, selectedUrls = []) {
+        let browser = null;
+        
+        try {
+            Logger.debug(`🚀 Launching isolated browser for "${keyword}"...`);
+            
+            // Try multiple launch configurations for stability
+            const launchConfigs = [
+                {
+                    headless: 'new',
+                    executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+                    args: [
+                        '--no-sandbox',
+                        '--disable-setuid-sandbox',
+                        '--disable-dev-shm-usage',
+                        '--disable-gpu',
+                        '--disable-web-security',
+                        '--remote-debugging-port=0'
+                    ],
+                    timeout: 10000
+                },
+                {
+                    headless: 'new',
+                    args: ['--no-sandbox', '--disable-setuid-sandbox', '--remote-debugging-port=0'],
+                    timeout: 10000
+                }
+            ];
+
+            let lastError = null;
+            for (const config of launchConfigs) {
+                try {
+                    browser = await puppeteer.launch(config);
+                    break;
+                } catch (configError) {
+                    lastError = configError;
+                    if (browser) {
+                        try { await browser.close(); } catch {}
+                        browser = null;
+                    }
+                }
+            }
+
+            if (!browser) {
+                throw new Error(`Browser launch failed: ${lastError?.message || 'Unknown error'}`);
+            }
+
+            const page = await browser.newPage();
             await page.setUserAgent('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
             await page.setViewport({ width: 1280, height: 720 });
+
+            // Navigate to memes site
+            await page.goto(this.memesSiteUrl, { waitUntil: 'domcontentloaded', timeout: 10000 });
             
-            // Add page error listeners
-            page.on('error', (error) => {
-                Logger.error('❌ Page error:', error.message);
-            });
-            
-            page.on('pageerror', (error) => {
-                Logger.warn('⚠️  Page JS error:', error.message);
-            });
-            
-            // Give browser time to fully initialize
-            await page.waitForTimeout(1000);
-            
-            // Navigate to memes site with retry logic
-            Logger.info(`🌐 Navigating to: ${this.memesSiteUrl}`);
-            let navigationSuccess = false;
-            const maxRetries = 3;
-            
-            for (let retry = 1; retry <= maxRetries; retry++) {
-                try {
-                    Logger.debug(`📡 Navigation attempt ${retry}/${maxRetries}...`);
-                    await page.goto(this.memesSiteUrl, { 
-                        waitUntil: 'domcontentloaded', // Less strict than networkidle2
-                        timeout: 10000 
-                    });
-                    navigationSuccess = true;
-                    Logger.success('✅ Page loaded successfully');
-                    break;
-                } catch (navError) {
-                    Logger.warn(`⚠️ Navigation attempt ${retry} failed: ${navError.message}`);
-                    if (retry < maxRetries) {
-                        Logger.debug('⏳ Waiting 1 second before retry...');
-                        await page.waitForTimeout(1000);
-                    }
-                }
-            }
-            
-            if (!navigationSuccess) {
-                throw new Error('Failed to navigate to memes site after multiple retries');
-            }
-            
-            Logger.info(`🔍 Starting search for ${keywords.length} keywords...`);
-            
-            // Store initial page state to return to if needed
-            const initialUrl = page.url();
-            
-            // Process each keyword one by one using the same page instance
-            for (let i = 0; i < keywords.length; i++) {
-                const keyword = keywords[i];
-                Logger.info(`🔎 [${i + 1}/${keywords.length}] Searching: "${keyword}"`);
-                
-                try {
-                    // Ensure we're on the right page (in case of redirects or errors)
-                    const currentUrl = page.url();
-                    if (!currentUrl.includes(this.memesSiteUrl.split('/')[2])) {
-                        Logger.debug('🔄 Returning to main search page...');
-                        await page.goto(this.memesSiteUrl, { waitUntil: 'domcontentloaded', timeout: 5000 });
-                        await page.waitForTimeout(500); // Brief wait for page to stabilize
-                    }
-                    
-                    // Search for a unique meme URL with retry logic to avoid duplicates
-                    let memeUrl;
-                    let retryCount = 0;
-                    const maxRetries = 5; // Prevent infinite loops
-                    
-                    do {
-                        memeUrl = await this.searchSingleKeyword(page, keyword, selectedUrls);
-                        retryCount++;
-                        
-                        if (selectedUrls.includes(memeUrl)) {
-                            Logger.debug(`🔄 Duplicate URL found for "${keyword}" (attempt ${retryCount}/${maxRetries}), retrying...`);
-                            if (retryCount >= maxRetries) {
-                                Logger.warn(`⚠️ Max retries reached for "${keyword}", accepting duplicate URL`);
-                                break;
-                            }
-                        }
-                    } while (selectedUrls.includes(memeUrl) && retryCount < maxRetries);
-                    
-                    // Add to selected URLs array and results
-                    selectedUrls.push(memeUrl);
-                    results.push({
-                        keyword: keyword,
-                        memeUrl: memeUrl
-                    });
-                    
-                    Logger.success(`✅ Found unique meme for "${keyword}": ${memeUrl.substring(0, 60)}...`);
-                    if (retryCount > 1) {
-                        Logger.info(`🎯 Required ${retryCount} attempts to find unique meme`);
-                    }
-                    
-                    // Rate limiting delay between searches to ensure proper loading
-                    if (i < keywords.length - 1) {
-                        Logger.debug(`⏱️  Brief pause before next search...`);
-                        await page.waitForTimeout(1000); // Increased delay for better stability
-                    }
-                    
-                } catch (error) {
-                    Logger.error(`❌ Failed to search for "${keyword}": ${error.message}`);
-                    Logger.debug('Error details:', error.stack);
-                    
-                    // Try to recover by returning to the main page
-                    try {
-                        Logger.debug('🔧 Attempting recovery by returning to main page...');
-                        await page.goto(this.memesSiteUrl, { waitUntil: 'domcontentloaded', timeout: 5000 });
-                        await page.waitForTimeout(1000);
-                    } catch (recoveryError) {
-                        Logger.warn('Recovery attempt failed:', recoveryError.message);
-                    }
-                    
-                    throw new Error(`Meme search failed for keyword "${keyword}": ${error.message}`);
-                }
-            }
-            
-            Logger.success(`🎉 Optimized meme search completed! Found ${results.length} memes using single browser instance`);
-            Logger.info(`⚡ Efficiency gains: Reused page instance for all ${keywords.length} searches`);
-            Logger.info(`🔒 Duplicate prevention: ${selectedUrls.length} unique URLs selected`);
-            return results;
-            
-        } catch (error) {
-            Logger.error('❌ Critical error during meme search:', error.message);
-            Logger.debug('Error details:', error.stack);
-            throw error;
+            // Perform the search using the existing logic
+            return await this.searchSingleKeyword(page, keyword, selectedUrls);
             
         } finally {
             if (browser) {
                 try {
-                    Logger.debug('🔒 Closing browser...');
                     await browser.close();
-                    Logger.debug('✅ Browser closed successfully');
+                    Logger.debug(`🔒 Closed isolated browser for "${keyword}"`);
                 } catch (closeError) {
-                    Logger.warn('⚠️  Error closing browser:', closeError.message);
+                    Logger.warn(`⚠️ Error closing browser for "${keyword}":`, closeError.message);
                 }
             }
         }

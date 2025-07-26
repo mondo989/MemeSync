@@ -58,9 +58,9 @@ def create_meme_video(slides_data, audio_path, output_path):
         
         # Create opening slide if logo exists and there's a gap before first slide
         video_clips = []
-        # Look for apu-slide.png first, then apu-logo.png
+        # Look for apu-slide.png first, then apu-logo.svg
         slide_logo_path = os.path.join(os.path.dirname(slides_data[0]['path']), 'apu-slide.png')
-        logo_path = os.path.join(os.path.dirname(slides_data[0]['path']), 'apu-logo.png')
+        logo_path = os.path.join(os.path.dirname(slides_data[0]['path']), 'apu-logo.svg')
         
         opening_image_path = slide_logo_path if os.path.exists(slide_logo_path) else (logo_path if os.path.exists(logo_path) else None)
         
@@ -107,7 +107,7 @@ def create_meme_video(slides_data, audio_path, output_path):
                 print(f"  ⚠️  Failed to create opening slide: {e}")
         else:
             if not opening_image_path:
-                print(f"  ℹ️  No opening image found (looked for apu-slide.png and apu-logo.png)")
+                print(f"  ℹ️  No opening image found (looked for apu-slide.png and apu-logo.svg)")
             else:
                 print(f"  ℹ️  No gap before first slide ({first_slide_start:.3f}s), skipping opening slide")
         
@@ -207,7 +207,7 @@ def create_meme_video(slides_data, audio_path, output_path):
         
         # Add persistent logo overlay (after opening slide ends)
         logo_clips = []
-        logo_overlay_path = os.path.join(os.path.dirname(slides_data[0]['path']), 'apu-logo.png')
+        logo_overlay_path = os.path.join(os.path.dirname(slides_data[0]['path']), 'apu-logo.svg')
         
         if os.path.exists(logo_overlay_path) and slides_start_offset > 0:
             try:
