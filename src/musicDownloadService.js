@@ -113,8 +113,11 @@ class MusicDownloadService {
             console.log(`[MUSIC] 🎵 Selected track: "${mp3Data.title}" (${mp3Data.duration})`);
             console.log(`[MUSIC] 🔗 MP3 URL: ${mp3Data.mp3Url.substring(0, 80)}...`);
             
-            // Download the MP3 file
-            const fileName = `background_music_${Date.now()}.mp3`;
+            // Clean up old background music files before downloading new one
+            await this.cleanupOldMusicFiles();
+            
+            // Use consistent filename that gets overwritten each time
+            const fileName = 'background_music_current.mp3';
             console.log(`[MUSIC] ⬇️ Starting download: ${fileName}`);
             const filePath = await this.downloadFile(mp3Data.mp3Url, fileName);
             
@@ -298,7 +301,7 @@ class MusicDownloadService {
             const searchResults = document.querySelectorAll('.bw-search__result');
             console.log(`[MUSIC-EVAL] Found ${searchResults.length} search results`);
             
-            if (searchResults.length === 0) {
+                if (searchResults.length === 0) {
                 console.log(`[MUSIC-EVAL] No search results found`);
                 return null;
             }
@@ -314,27 +317,27 @@ class MusicDownloadService {
                     continue;
                 }
                 
-                const mp3Url = player.getAttribute('data-mp3');
-                if (!mp3Url) {
+                    const mp3Url = player.getAttribute('data-mp3');
+                    if (!mp3Url) {
                     console.log(`[MUSIC-EVAL] No MP3 URL found in result ${randomIndex + 1}`);
-                    continue;
+                        continue;
+                    }
+                    
+                const titleElement = result.querySelector('.sound-title a');
+                    const title = titleElement ? titleElement.textContent.trim() : 'Unknown';
+                    
+                const durationElement = result.querySelector('.duration');
+                    const duration = durationElement ? durationElement.textContent.trim() : 'Unknown';
+                    
+                console.log(`[MUSIC-EVAL] ✅ Found valid MP3: "${title}" (${duration})`);
+                    return {
+                        mp3Url: mp3Url,
+                        title: title,
+                        duration: duration,
+                        index: randomIndex
+                    };
                 }
                 
-                const titleElement = result.querySelector('.sound-title a');
-                const title = titleElement ? titleElement.textContent.trim() : 'Unknown';
-                
-                const durationElement = result.querySelector('.duration');
-                const duration = durationElement ? durationElement.textContent.trim() : 'Unknown';
-                
-                console.log(`[MUSIC-EVAL] ✅ Found valid MP3: "${title}" (${duration})`);
-                return {
-                    mp3Url: mp3Url,
-                    title: title,
-                    duration: duration,
-                    index: randomIndex
-                };
-            }
-            
             console.log(`[MUSIC-EVAL] No valid MP3 URLs found after checking results`);
             return null;
         });
@@ -455,6 +458,34 @@ class MusicDownloadService {
         } catch (error) {
             console.error(`[MUSIC] ❌ Failed to create silent audio: ${error.message}`);
             return null;
+        }
+    }
+
+    /**
+     * Clean up old background music files to prevent accumulation
+     */
+    async cleanupOldMusicFiles() {
+        try {
+            const files = fs.readdirSync(this.downloadDir);
+            
+            // Remove old background_music files (but keep the current one)
+            const musicFilesToDelete = files.filter(file => 
+                file.startsWith('background_music_') && 
+                file.endsWith('.mp3') && 
+                file !== 'background_music_current.mp3'
+            );
+            
+            for (const file of musicFilesToDelete) {
+                const filePath = path.join(this.downloadDir, file);
+                fs.unlinkSync(filePath);
+                console.log(`[MUSIC] 🗑️ Cleaned up old music file: ${file}`);
+            }
+            
+            if (musicFilesToDelete.length > 0) {
+                console.log(`[MUSIC] 🧹 Cleaned up ${musicFilesToDelete.length} old music files`);
+            }
+        } catch (error) {
+            console.warn(`[MUSIC] ⚠️ Failed to cleanup old music files: ${error.message}`);
         }
     }
 }

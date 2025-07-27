@@ -62,15 +62,20 @@ def create_meme_video(slides_data, audio_path, output_path, database='apu'):
         
         # Look for database-specific slide first, then logo (original logic but database-aware)
         slides_dir = os.path.dirname(slides_data[0]['path'])
+        opening_image_path = None
         
         if database == 'bobo':
             slide_logo_path = os.path.join(slides_dir, 'bobo-slide.png')
             logo_path = os.path.join(slides_dir, 'bobo-logo.png')
-        else:  # default to 'apu' (including 'other' for now)
+            opening_image_path = slide_logo_path if os.path.exists(slide_logo_path) else (logo_path if os.path.exists(logo_path) else None)
+        elif database == 'apu':
             slide_logo_path = os.path.join(slides_dir, 'apu-slide.png')
             logo_path = os.path.join(slides_dir, 'apu-logo.svg')
-        
-        opening_image_path = slide_logo_path if os.path.exists(slide_logo_path) else (logo_path if os.path.exists(logo_path) else None)
+            opening_image_path = slide_logo_path if os.path.exists(slide_logo_path) else (logo_path if os.path.exists(logo_path) else None)
+        elif database == 'other':
+            # Skip opening slide for 'other' database (CC0 photos) - start directly with content
+            opening_image_path = None
+            print(f"  ℹ️  Skipping opening slide for 'other' database - starting with content directly")
         
         if opening_image_path and opening_duration > 0:
             try:
@@ -117,8 +122,9 @@ def create_meme_video(slides_data, audio_path, output_path, database='apu'):
             if not opening_image_path:
                 if database == 'bobo':
                     print(f"  ℹ️  No opening image found (looked for bobo-slide.png and bobo-logo.png)")
-                else:
+                elif database == 'apu':
                     print(f"  ℹ️  No opening image found (looked for apu-slide.png and apu-logo.svg)")
+                # For 'other' database, we intentionally skip opening image, so no message needed
             else:
                 print(f"  ℹ️  No gap before first slide ({first_slide_start:.3f}s), skipping opening slide")
         

@@ -109,9 +109,9 @@ app.post('/api/generate', async (req, res) => {
         generateScriptVideoAsync(jobId, scriptText, { 
             voiceId: voiceId || 'voice1', 
             musicSearch: musicSearch || 'ambient peaceful background music', 
-            photoSource: photoSource || 'unsplash',
+            photoSource: photoSource || 'pexels',
             soundSource: soundSource || 'freesound',
-            database: database || 'apu' 
+            database: database || 'other' // Use 'other' for script mode (CC0 photos)
         });
     } else {
         generateVideoAsync(jobId, youtubeUrl, { 

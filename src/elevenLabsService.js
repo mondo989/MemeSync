@@ -15,7 +15,7 @@ class ElevenLabsService {
         const voice = this.getVoiceMapping(voiceId);
         
         try {
-            const response = await fetch(`${this.baseUrl}/text-to-speech/${voice}`, {
+            const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voice}`, {
                 method: 'POST',
                 headers: {
                     'Accept': 'audio/mpeg',
@@ -24,19 +24,16 @@ class ElevenLabsService {
                 },
                 body: JSON.stringify({
                     text: text,
-                    model_id: 'eleven_monolingual_v1',
+                    model_id: "eleven_multilingual_v2",
                     voice_settings: {
                         stability: 0.5,
-                        similarity_boost: 0.5,
-                        style: 0.0,
-                        use_speaker_boost: true
+                        similarity_boost: 0.5
                     }
                 })
             });
 
             if (!response.ok) {
-                const errorText = await response.text();
-                throw new Error(`ElevenLabs API error: ${response.status} - ${errorText}`);
+                throw new Error(`ElevenLabs API error: ${response.status} ${response.statusText}`);
             }
 
             const audioBuffer = await response.arrayBuffer();
@@ -47,7 +44,11 @@ class ElevenLabsService {
                 fs.mkdirSync(mediaDir, { recursive: true });
             }
             
-            const audioPath = path.join(mediaDir, `generated_speech_${Date.now()}.mp3`);
+            // Clean up old speech files before creating new one
+            await this.cleanupOldSpeechFiles(mediaDir);
+            
+            // Use consistent filename that gets overwritten each time
+            const audioPath = path.join(mediaDir, 'generated_speech_current.mp3');
             const audioBufferData = Buffer.from(audioBuffer);
             fs.writeFileSync(audioPath, audioBufferData);
             
@@ -75,6 +76,36 @@ class ElevenLabsService {
             voice5: 'jBpfuIE2acCO8z3wKNLl'  // Gigi - Friendly
         };
         return voices[voiceId] || voices.voice1;
+    }
+
+    /**
+     * Clean up old speech files to prevent accumulation
+     * @param {string} mediaDir - Media directory path
+     */
+    async cleanupOldSpeechFiles(mediaDir) {
+        try {
+            const fs = require('fs');
+            const files = fs.readdirSync(mediaDir);
+            
+            // Remove old generated_speech files (but keep the current one)
+            const speechFilesToDelete = files.filter(file => 
+                file.startsWith('generated_speech_') && 
+                file.endsWith('.mp3') && 
+                file !== 'generated_speech_current.mp3'
+            );
+            
+            for (const file of speechFilesToDelete) {
+                const filePath = path.join(mediaDir, file);
+                fs.unlinkSync(filePath);
+                console.log(`🗑️ Cleaned up old speech file: ${file}`);
+            }
+            
+            if (speechFilesToDelete.length > 0) {
+                console.log(`🧹 Cleaned up ${speechFilesToDelete.length} old speech files`);
+            }
+        } catch (error) {
+            console.warn(`⚠️ Failed to cleanup old speech files: ${error.message}`);
+        }
     }
 
     getVoiceInfo() {

@@ -138,7 +138,7 @@ class SlideRenderer {
             const templateUrl = `file://${this.templatePath}`;
             await page.goto(templateUrl, { waitUntil: 'networkidle2' });
             
-            // Inject database-specific background color
+            // Inject database-specific styles (background color and image sizing)
             await page.evaluate((database) => {
                 let backgroundColor;
                 switch (database.toLowerCase()) {
@@ -151,6 +151,19 @@ class SlideRenderer {
                         break;
                     case 'other':
                         backgroundColor = '#000000';
+                        // For 'other' database, make images fill more of the screen
+                        const container = document.querySelector('.meme-container');
+                        const image = document.querySelector('.meme-image');
+                        if (container && image) {
+                            // Make container fill full viewport height and most of width
+                            container.style.width = '100%';
+                            container.style.height = '100vh';
+                            // Ensure image fills container with proper aspect ratio
+                            image.style.width = 'auto';
+                            image.style.height = '100vh';
+                            image.style.maxWidth = '100vw';
+                            image.style.objectFit = 'contain';
+                        }
                         break;
                     default:
                         backgroundColor = 'radial-gradient(64.01% 64.01% at 50% 50%, rgba(93, 143, 54, 0.9) 0%, rgba(0, 0, 0, 0.5) 83.17%), #000000';
@@ -164,19 +177,24 @@ class SlideRenderer {
                 img.src = memeUrl;
             }, memeUrl);
             
-            // Handle database-specific logo overlay (original logic but database-aware)
-            let logoPath, slideName;
+            // Handle database-specific logo overlay
+            let logoPath, slideName, shouldShowLogo = false, isSpecialSlide = false;
             
             if (database.toLowerCase() === 'bobo') {
                 logoPath = path.join(this.slidesDir, 'bobo-logo.png');
                 slideName = 'bobo-slide';
-            } else { // default to 'apu' (including 'other')
+                isSpecialSlide = filename.includes(slideName) || memeUrl.includes(`${slideName}.png`);
+                shouldShowLogo = !isSpecialSlide && await this.fileExists(logoPath);
+            } else if (database.toLowerCase() === 'apu') {
                 logoPath = path.join(this.slidesDir, 'apu-logo.svg');
                 slideName = 'apu-slide';
+                isSpecialSlide = filename.includes(slideName) || memeUrl.includes(`${slideName}.png`);
+                shouldShowLogo = !isSpecialSlide && await this.fileExists(logoPath);
+            } else if (database.toLowerCase() === 'other') {
+                // No logo for 'other' database (CC0 photos) - keep clean
+                shouldShowLogo = false;
+                Logger.debug(`Skipping logo for 'other' database - keeping slide clean`);
             }
-            
-            const isSpecialSlide = filename.includes(slideName) || memeUrl.includes(`${slideName}.png`);
-            const shouldShowLogo = !isSpecialSlide && await this.fileExists(logoPath);
             
             if (shouldShowLogo) {
                 await page.evaluate((logoPath) => {

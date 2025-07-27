@@ -10,6 +10,7 @@ const VideoRenderer = require('./renderVideo');
 const PuppeteerScraper = require('./puppeteerScraper');
 const ElevenLabsService = require('./elevenLabsService');
 const MusicDownloadService = require('./musicDownloadService');
+const path = require('path'); // Added for path.join
 
 class MemeVideoGenerator {
     constructor() {
@@ -337,12 +338,33 @@ class MemeVideoGenerator {
         try {
             await Promise.all([
                 this.slideRenderer.cleanup(),
-                this.videoRenderer.cleanup()
+                this.videoRenderer.cleanup(),
+                this.musicDownloadService.cleanup(),
+                this.cleanupGeneratedFiles()
             ]);
             
             Logger.success('✅ Cleanup completed');
         } catch (error) {
             Logger.warn('⚠️  Cleanup failed:', error.message);
+        }
+    }
+
+    /**
+     * Clean up generated speech and music files
+     */
+    async cleanupGeneratedFiles() {
+        try {
+            const mediaDir = path.join(__dirname, '../media');
+            const fs = require('fs');
+            
+            if (fs.existsSync(mediaDir)) {
+                // Clean up old generated files
+                await this.elevenLabsService.cleanupOldSpeechFiles(mediaDir);
+                await this.musicDownloadService.cleanupOldMusicFiles();
+                Logger.info('🗑️ Generated files cleaned up');
+            }
+        } catch (error) {
+            Logger.warn('⚠️ Failed to cleanup generated files:', error.message);
         }
     }
 
