@@ -329,11 +329,7 @@
                     name="voiceId"
                     style="width: 100%; padding: 16px; border: 2px solid #e2e8f0; border-radius: 12px; font-size: 1rem; transition: all 0.3s ease; background: #f7fafc;"
                 >
-                    <option value="voice1">Voice 1 - Natural</option>
-                    <option value="voice2">Voice 2 - Energetic</option>
-                    <option value="voice3">Voice 3 - Calm</option>
-                    <option value="voice4">Voice 4 - Dramatic</option>
-                    <option value="voice5">Voice 5 - Friendly</option>
+                    <option value="">Loading voices...</option>
                 </select>
             </div>
 
@@ -480,8 +476,35 @@
         let currentJobId = null;
         let eventSource = null;
 
+        // Load available voices from API
+        async function loadVoices() {
+            try {
+                const response = await fetch('/api/voices');
+                const voices = await response.json();
+                
+                const voiceSelect = document.getElementById('voiceId');
+                voiceSelect.innerHTML = ''; // Clear loading message
+                
+                // Add voices to select dropdown
+                Object.entries(voices).forEach(([voiceId, voiceInfo]) => {
+                    const option = document.createElement('option');
+                    option.value = voiceId;
+                    option.textContent = `${voiceInfo.name} - ${voiceInfo.description}`;
+                    voiceSelect.appendChild(option);
+                });
+                
+                console.log(`✅ Loaded ${Object.keys(voices).length} voices`);
+            } catch (error) {
+                console.error('❌ Failed to load voices:', error);
+                const voiceSelect = document.getElementById('voiceId');
+                voiceSelect.innerHTML = '<option value="voice1">Voice 1 - Natural (fallback)</option>';
+            }
+        }
+
         // Handle mode switching
         document.addEventListener('DOMContentLoaded', function() {
+            // Load voices when page loads
+            loadVoices();
             const databaseRadios = document.querySelectorAll('input[name="database"]');
             
             databaseRadios.forEach(radio => {

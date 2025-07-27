@@ -212,6 +212,17 @@ app.get('/api/health', (req, res) => {
     });
 });
 
+// Get available voices
+app.get('/api/voices', (req, res) => {
+    try {
+        const voiceInfo = generator.elevenLabsService.getVoiceInfo();
+        res.json(voiceInfo);
+    } catch (error) {
+        Logger.error('❌ Failed to get voice info:', error);
+        res.status(500).json({ error: 'Failed to get voice information' });
+    }
+});
+
 async function generateScriptVideoAsync(jobId, scriptText, options) {
     // Update job status
     const updateJob = (status, progress, message, outputPath = null) => {
@@ -414,6 +425,7 @@ app.listen(PORT, () => {
     Logger.info('   📊 GET  /api/status/:jobId   - Check job status');
     Logger.info('   📡 GET  /api/stream/:jobId   - Real-time updates');
     Logger.info('   📥 GET  /api/download/:file  - Download generated video');
+    Logger.info('   🎭 GET  /api/voices          - Get available voice options');
     Logger.info('   🧹 POST /api/cleanup         - Clean up temporary files');
     Logger.info('   ❤️  GET  /api/health         - Health check');
     

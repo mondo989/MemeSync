@@ -67,13 +67,23 @@ class ElevenLabsService {
     }
 
     getVoiceMapping(voiceId) {
-        // These are actual ElevenLabs voice IDs - you may need to update with your preferred voices
+        // These are actual ElevenLabs voice IDs - expanded selection with spooky/atmospheric voices
         const voices = {
             voice1: 'pNInz6obpgDQGcFmaJgB', // Adam - Natural
             voice2: 'ErXwobaYiN019PkySvjV', // Antoni - Energetic  
             voice3: 'VR6AewLTigWG4xSOukaG', // Arnold - Calm
             voice4: 'rF5l8JggYM5VtGMNwK8t', // Bella - Dramatic
-            voice5: 'jBpfuIE2acCO8z3wKNLl'  // Gigi - Friendly
+            voice5: 'jBpfuIE2acCO8z3wKNLl', // Gigi - Friendly
+            voice6: 'TxGEqnHWrfWFTfGW9XjX', // Josh - Deep and authoritative
+            voice7: 'D38z5RcWu1voky8WS1ja', // Fin - Dark and mysterious
+            voice8: 'ZQe5CqHNLWdVhrnuN8oN', // Freya - Atmospheric and haunting
+            voice9: 'SOYHLrjzK2X1ezoPC6cr', // Harry - Sinister and dramatic
+            voice10: 'Yko7PKHZNXotIFUBG7I9', // Emily - Ethereal and mysterious
+            voice11: 'bVMeCyTHy58xNoL34h3p', // Jeremy - Dark narrator
+            voice12: 'EXAVITQu4vr4xnSDxMaL', // Sarah - Whispery and eerie
+            voice13: 'MF3mGyEYCl7XYWbV9V6O', // Elli - Ghostly and soft
+            voice14: 'TX3LPaxmHKxFdv7VOQHJ', // Liam - Deep and ominous
+            voice15: 'XB0fDUnXU5powFXDhCwa', // Charlotte - Mysterious female
         };
         return voices[voiceId] || voices.voice1;
     }
@@ -114,7 +124,17 @@ class ElevenLabsService {
             voice2: { name: 'Antoni', description: 'Energetic and expressive' },
             voice3: { name: 'Arnold', description: 'Calm and steady' },
             voice4: { name: 'Bella', description: 'Dramatic and engaging' },
-            voice5: { name: 'Gigi', description: 'Friendly and warm' }
+            voice5: { name: 'Gigi', description: 'Friendly and warm' },
+            voice6: { name: 'Josh', description: 'Deep and authoritative' },
+            voice7: { name: 'Fin', description: '🎭 Dark and mysterious' },
+            voice8: { name: 'Freya', description: '👻 Atmospheric and haunting' },
+            voice9: { name: 'Harry', description: '🔥 Sinister and dramatic' },
+            voice10: { name: 'Emily', description: '✨ Ethereal and mysterious' },
+            voice11: { name: 'Jeremy', description: '📚 Dark narrator voice' },
+            voice12: { name: 'Sarah', description: '🌙 Whispery and eerie' },
+            voice13: { name: 'Elli', description: '👤 Ghostly and soft' },
+            voice14: { name: 'Liam', description: '⚡ Deep and ominous' },
+            voice15: { name: 'Charlotte', description: '🔮 Mysterious female voice' }
         };
     }
 }
