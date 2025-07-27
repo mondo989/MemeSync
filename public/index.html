@@ -67,7 +67,7 @@
             letter-spacing: 0.5px;
         }
 
-        input[type="text"], input[type="url"] {
+        input[type="text"], input[type="url"], textarea, select {
             width: 100%;
             padding: 16px;
             border: 2px solid #e2e8f0;
@@ -77,11 +77,21 @@
             background: #f7fafc;
         }
 
-        input[type="text"]:focus, input[type="url"]:focus {
+        input[type="text"]:focus, input[type="url"]:focus, textarea:focus, select:focus {
             outline: none;
             border-color: #667eea;
             box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
             background: white;
+        }
+
+        textarea {
+            min-height: 120px;
+            resize: vertical;
+            font-family: inherit;
+        }
+
+        select {
+            cursor: pointer;
         }
 
         .time-inputs {
@@ -287,7 +297,7 @@
         </div>
 
         <form id="generateForm">
-            <div class="form-group">
+            <div class="form-group" id="youtubeGroup">
                 <label for="youtubeUrl">YouTube URL</label>
                 <input 
                     type="url" 
@@ -297,6 +307,76 @@
                     value="https://www.youtube.com/watch?v=-1iF8CJGOZ0&list=RD-1iF8CJGOZ0&start_radio=1"
                     required
                 >
+            </div>
+
+            <!-- Script Input for Other Mode -->
+            <div class="form-group" id="scriptGroup" style="display: none;">
+                <label for="scriptText">Script Text</label>
+                <textarea 
+                    id="scriptText" 
+                    name="scriptText" 
+                    rows="6" 
+                    placeholder="Enter your story script here..."
+                    style="width: 100%; padding: 16px; border: 2px solid #e2e8f0; border-radius: 12px; font-size: 1rem; transition: all 0.3s ease; background: #f7fafc; resize: vertical; font-family: inherit;"
+                ></textarea>
+            </div>
+
+            <!-- Voice Selection for Other Mode -->
+            <div class="form-group" id="voiceGroup" style="display: none;">
+                <label for="voiceId">Voice Selection</label>
+                <select 
+                    id="voiceId" 
+                    name="voiceId"
+                    style="width: 100%; padding: 16px; border: 2px solid #e2e8f0; border-radius: 12px; font-size: 1rem; transition: all 0.3s ease; background: #f7fafc;"
+                >
+                    <option value="voice1">Voice 1 - Natural</option>
+                    <option value="voice2">Voice 2 - Energetic</option>
+                    <option value="voice3">Voice 3 - Calm</option>
+                    <option value="voice4">Voice 4 - Dramatic</option>
+                    <option value="voice5">Voice 5 - Friendly</option>
+                </select>
+            </div>
+
+            <!-- Music Search for Other Mode -->
+            <div class="form-group" id="musicGroup" style="display: none;">
+                <label for="musicSearch">Background Music Search</label>
+                <input 
+                    type="text" 
+                    id="musicSearch" 
+                    name="musicSearch" 
+                    placeholder="e.g. ambient peaceful, upbeat electronic, dramatic cinematic..."
+                    style="width: 100%; padding: 16px; border: 2px solid #e2e8f0; border-radius: 12px; font-size: 1rem; transition: all 0.3s ease; background: #f7fafc;"
+                >
+            </div>
+
+            <!-- Photo Source for Other Mode -->
+            <div class="form-group" id="photoSourceGroup" style="display: none;">
+                <label for="photoSource">Photo Source</label>
+                <select 
+                    id="photoSource" 
+                    name="photoSource"
+                    style="width: 100%; padding: 16px; border: 2px solid #e2e8f0; border-radius: 12px; font-size: 1rem; transition: all 0.3s ease; background: #f7fafc;"
+                >
+                    <option value="unsplash">📷 Unsplash</option>
+                    <option value="pexels">📸 Pexels</option>
+                    <option value="pixabay">🖼️ Pixabay</option>
+                    <option value="custom">🎨 Custom Photos</option>
+                </select>
+            </div>
+
+            <!-- Sound Source for Other Mode -->
+            <div class="form-group" id="soundSourceGroup" style="display: none;">
+                <label for="soundSource">Sound Source</label>
+                <select 
+                    id="soundSource" 
+                    name="soundSource"
+                    style="width: 100%; padding: 16px; border: 2px solid #e2e8f0; border-radius: 12px; font-size: 1rem; transition: all 0.3s ease; background: #f7fafc;"
+                >
+                    <option value="freesound">🎵 Freesound</option>
+                    <option value="zapsplat">🔊 Zapsplat</option>
+                    <option value="audiojungle">🎶 AudioJungle</option>
+                    <option value="custom">🎨 Custom Sounds</option>
+                </select>
             </div>
 
             <div class="form-group">
@@ -317,7 +397,7 @@
                 </div>
             </div>
 
-            <div class="form-group">
+            <div class="form-group" id="timeRangeGroup">
                 <label>Time Range (Optional)</label>
                 <div class="time-inputs">
                     <input 
@@ -386,27 +466,106 @@
         const cleanupBtn = document.getElementById('cleanupBtn');
         const errorMessage = document.getElementById('errorMessage');
 
+        // Form mode elements
+        const youtubeGroup = document.getElementById('youtubeGroup');
+        const scriptGroup = document.getElementById('scriptGroup');
+        const voiceGroup = document.getElementById('voiceGroup');
+        const musicGroup = document.getElementById('musicGroup');
+        const photoSourceGroup = document.getElementById('photoSourceGroup');
+        const soundSourceGroup = document.getElementById('soundSourceGroup');
+        const timeRangeGroup = document.getElementById('timeRangeGroup');
+        const youtubeUrlInput = document.getElementById('youtubeUrl');
+        const scriptTextInput = document.getElementById('scriptText');
+
         let currentJobId = null;
         let eventSource = null;
+
+        // Handle mode switching
+        document.addEventListener('DOMContentLoaded', function() {
+            const databaseRadios = document.querySelectorAll('input[name="database"]');
+            
+            databaseRadios.forEach(radio => {
+                radio.addEventListener('change', function() {
+                    if (this.value === 'other') {
+                        // Switch to script mode
+                        youtubeGroup.style.display = 'none';
+                        timeRangeGroup.style.display = 'none';
+                        scriptGroup.style.display = 'block';
+                        voiceGroup.style.display = 'block';
+                        musicGroup.style.display = 'block';
+                        photoSourceGroup.style.display = 'block';
+                        soundSourceGroup.style.display = 'block';
+                        
+                        // Update button text
+                        generateBtn.innerHTML = '🚀 Generate Video';
+                        
+                        // Update validation
+                        youtubeUrlInput.required = false;
+                        scriptTextInput.required = true;
+                    } else {
+                        // Switch to YouTube mode
+                        youtubeGroup.style.display = 'block';
+                        timeRangeGroup.style.display = 'block';
+                        scriptGroup.style.display = 'none';
+                        voiceGroup.style.display = 'none';
+                        musicGroup.style.display = 'none';
+                        photoSourceGroup.style.display = 'none';
+                        soundSourceGroup.style.display = 'none';
+                        
+                        // Update button text
+                        generateBtn.innerHTML = '🚀 Generate Meme Video';
+                        
+                        // Update validation
+                        youtubeUrlInput.required = true;
+                        scriptTextInput.required = false;
+                    }
+                });
+            });
+        });
 
         form.addEventListener('submit', async (e) => {
             e.preventDefault();
             
             const formData = new FormData(form);
-            const data = {
-                youtubeUrl: formData.get('youtubeUrl'),
+            const database = formData.get('database') || 'apu';
+            
+            let data = {
+                database: database,
                 startTime: formData.get('startTime') || null,
-                endTime: formData.get('endTime') || null,
-                database: formData.get('database') || 'apu'
+                endTime: formData.get('endTime') || null
             };
 
-            // Validate YouTube URL
-            if (!data.youtubeUrl.includes('youtube.com') && !data.youtubeUrl.includes('youtu.be')) {
-                alert('Please enter a valid YouTube URL');
-                return;
+            // Determine mode and add appropriate fields
+            if (database === 'other') {
+                // Script mode
+                data.scriptText = formData.get('scriptText');
+                data.voiceId = formData.get('voiceId');
+                data.musicSearch = formData.get('musicSearch');
+                data.photoSource = formData.get('photoSource');
+                data.soundSource = formData.get('soundSource');
+                
+                // Validate script text
+                if (!data.scriptText || data.scriptText.trim().length === 0) {
+                    alert('Please enter a script text');
+                    return;
+                }
+                
+                if (data.scriptText.trim().length < 10) {
+                    alert('Script text should be at least 10 characters long');
+                    return;
+                }
+            } else {
+                // YouTube mode
+                data.youtubeUrl = formData.get('youtubeUrl');
+                
+                // Validate YouTube URL
+                if (!data.youtubeUrl || (!data.youtubeUrl.includes('youtube.com') && !data.youtubeUrl.includes('youtu.be'))) {
+                    alert('Please enter a valid YouTube URL');
+                    return;
+                }
             }
 
-            // Validate time format
+            // Validate time format (applies to both modes)
             if (data.startTime && !/^\d{2}:\d{2}$/.test(data.startTime)) {
                 alert('Please enter start time in MM:SS format (e.g., 00:30)');
                 return;
@@ -519,7 +678,13 @@
 
         function resetForm() {
             generateBtn.disabled = false;
-            generateBtn.textContent = '🚀 Generate Meme Video';
+            // Check current mode to set appropriate button text
+            const selectedDatabase = document.querySelector('input[name="database"]:checked').value;
+            if (selectedDatabase === 'other') {
+                generateBtn.textContent = '🚀 Generate Video';
+            } else {
+                generateBtn.textContent = '🚀 Generate Meme Video';
+            }
         }
 
         cleanupBtn.addEventListener('click', async () => {

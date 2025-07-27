@@ -237,6 +237,104 @@ class VideoRenderer {
     }
 
     /**
+     * Create video with mixed audio (speech + background music)
+     * @param {Array} slides - Array of slide objects
+     * @param {string} speechPath - Path to speech audio file
+     * @param {string} musicPath - Path to background music file
+     * @param {string} database - Database name for output naming
+     * @returns {Promise<string>} - Path to generated video
+     */
+    async createVideoWithMixedAudio(slides, speechPath, musicPath, database = 'apu') {
+        await this.initialize();
+
+        Logger.info(`Creating video with mixed audio - ${slides.length} slides`);
+        Logger.info(`Speech: ${speechPath}`);
+        Logger.info(`Music: ${musicPath}`);
+
+        try {
+            // Check if both audio files exist
+            await fs.access(speechPath);
+            await fs.access(musicPath);
+            
+            // Get speech duration to determine video length
+            const speechDuration = await this.getAudioDuration(speechPath);
+            Logger.info(`Creating video with ${slides.length} slides over ${speechDuration}s speech`);
+            
+            // Create mixed audio first
+            const mixedAudioPath = await this.createMixedAudio(speechPath, musicPath, speechDuration);
+            
+            // Create video with mixed audio
+            await this.createTimedSlideshow(slides, mixedAudioPath, database);
+            
+            Logger.success(`Video with mixed audio created successfully: ${this.outputPath}`);
+            return this.outputPath;
+
+        } catch (error) {
+            Logger.error('Failed to create video with mixed audio:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Create mixed audio combining speech and background music
+     * @param {string} speechPath - Path to speech audio file
+     * @param {string} musicPath - Path to background music file
+     * @param {number} duration - Target duration in seconds
+     * @returns {Promise<string>} - Path to mixed audio file
+     */
+    async createMixedAudio(speechPath, musicPath, duration) {
+        const mixedAudioPath = path.join(this.mediaDir, `mixed_audio_${Date.now()}.mp3`);
+        
+        Logger.info('Creating mixed audio track...');
+        
+        return new Promise((resolve, reject) => {
+            // Create complex filter for mixing audio
+            const filterComplex = [
+                // Loop/extend music to match speech duration if needed
+                '[1:a]aloop=loop=-1:size=2e+09[music_loop]',
+                
+                // Adjust volumes: speech at full volume, music at 25% volume
+                '[0:a]volume=1.0[speech_vol]',
+                '[music_loop]volume=0.25[music_vol]',
+                
+                // Mix the audio streams
+                '[speech_vol][music_vol]amix=inputs=2:duration=shortest[mixed]'
+            ].join(';');
+
+            let command = ffmpeg()
+                .input(speechPath)    // Input 0: speech
+                .input(musicPath)     // Input 1: music
+                .complexFilter(filterComplex, 'mixed')
+                .outputOptions([
+                    '-c:a mp3',
+                    '-b:a 192k',
+                    '-ac 2',
+                    '-ar 44100'
+                ])
+                .duration(duration)   // Limit to speech duration
+                .output(mixedAudioPath)
+                .on('start', (commandLine) => {
+                    Logger.debug('Mixed audio FFmpeg command:', commandLine);
+                })
+                .on('progress', (progress) => {
+                    if (progress.percent) {
+                        Logger.info(`Audio mixing progress: ${Math.round(progress.percent)}%`);
+                    }
+                })
+                .on('end', () => {
+                    Logger.success(`Mixed audio created: ${mixedAudioPath}`);
+                    resolve(mixedAudioPath);
+                })
+                .on('error', (error) => {
+                    Logger.error('Audio mixing failed:', error);
+                    reject(error);
+                });
+
+            command.run();
+        });
+    }
+
+    /**
      * Create video with precise slide timing
      * @param {Array} slides - Array of slide objects
      * @param {string} audioPath - Path to audio file

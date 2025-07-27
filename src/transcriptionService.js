@@ -27,6 +27,75 @@ class TranscriptionService {
     }
 
     /**
+     * Transcribe audio file (from ElevenLabs or other sources)
+     * @param {string} audioFilePath - Path to the audio file
+     * @returns {Array} - Array of {start, end, text} objects
+     */
+    async transcribeAudioFile(audioFilePath) {
+        Logger.info(`Starting transcription of audio file: ${audioFilePath}`);
+
+        if (!this.lemonFoxApiKey) {
+            throw new Error('LemonFox API key is required for transcription');
+        }
+
+        try {
+            // Verify file exists and get details
+            await fs.access(audioFilePath);
+            const stats = await fs.stat(audioFilePath);
+            Logger.info('Audio file found, starting transcription...');
+            Logger.info(`File size: ${Math.round(stats.size / 1024)}KB`);
+            Logger.info(`File path: ${audioFilePath}`);
+            
+            // Check if file is too small (might indicate a problem)
+            if (stats.size < 1000) {
+                Logger.warn(`⚠️ Audio file is very small (${stats.size} bytes) - this might indicate a problem`);
+            }
+        } catch (error) {
+            Logger.error(`Audio file access failed: ${error.message}`);
+            throw new Error(`Audio file not found: ${audioFilePath}`);
+        }
+
+        try {
+            // Create form data for LemonFox API  
+            const FormData = require('form-data');
+            const fs_sync = require('fs');
+            const formData = new FormData();
+            
+            // Upload the audio file
+            formData.append('file', fs_sync.createReadStream(audioFilePath));
+            formData.append('response_format', 'verbose_json');
+            formData.append('language', 'english');
+            formData.append('timestamp_granularities[]', 'word');
+
+            Logger.info(`Submitting transcription request to: ${this.lemonFoxApiUrl}/v1/audio/transcriptions`);
+            Logger.info(`File being uploaded: ${path.basename(audioFilePath)}`);
+
+            // Submit transcription request
+            const response = await axios.post(`${this.lemonFoxApiUrl}/v1/audio/transcriptions`, formData, {
+                headers: {
+                    'Authorization': `Bearer ${this.lemonFoxApiKey}`,
+                    ...formData.getHeaders()
+                },
+                timeout: 120000 // 2 minute timeout for file upload
+            });
+
+            Logger.info(`Transcription request completed with status: ${response.status}`);
+
+            Logger.info('LemonFox transcription completed for audio file');
+            Logger.info('Raw LemonFox response:', JSON.stringify(response.data, null, 2));
+            
+            const transcript = this.parseLemonFoxResponse(response.data);
+            Logger.success(`Audio transcription completed: ${transcript.length} segments`);
+            
+            return transcript;
+
+        } catch (error) {
+            Logger.error('Audio file transcription failed:', error.response?.data || error.message);
+            throw new Error(`Failed to transcribe audio file: ${error.message}`);
+        }
+    }
+
+    /**
      * Transcribe using LemonFox.ai API
      * @param {string} youtubeUrl - YouTube video URL
      * @param {string} startTime - Start time
