@@ -53,20 +53,42 @@ app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, '../public/index.html'));
 });
 
-// Generate video endpoint
+// Generate video endpoint (supports both YouTube and script modes)
 app.post('/api/generate', async (req, res) => {
-    const { youtubeUrl, startTime, endTime, thumbnailMemeUrl } = req.body;
+    const { youtubeUrl, scriptText, voiceId, musicSearch, photoSource, soundSource, startTime, endTime, thumbnailMemeUrl, database } = req.body;
+    
+    // Determine mode based on input
+    const isScriptMode = scriptText && scriptText.trim().length > 0;
     
     Logger.info('🎬 New video generation request:', {
+        mode: isScriptMode ? 'script' : 'youtube',
         youtubeUrl: youtubeUrl?.substring(0, 50) + '...',
+        scriptLength: scriptText?.length,
+        voiceId,
+        musicSearch,
+        photoSource,
+        soundSource,
         startTime,
         endTime,
+        database: database || 'apu',
         ip: req.ip
     });
     
-    if (!youtubeUrl) {
-        Logger.warn('❌ Generation request missing YouTube URL');
-        return res.status(400).json({ error: 'YouTube URL is required' });
+    // Validate inputs based on mode
+    if (isScriptMode) {
+        if (!scriptText || scriptText.trim().length === 0) {
+            Logger.warn('❌ Script mode request missing script text');
+            return res.status(400).json({ error: 'Script text is required for script mode' });
+        }
+        if (scriptText.trim().length < 10) {
+            Logger.warn('❌ Script text too short');
+            return res.status(400).json({ error: 'Script text must be at least 10 characters long' });
+        }
+    } else {
+        if (!youtubeUrl) {
+            Logger.warn('❌ YouTube mode request missing YouTube URL');
+            return res.status(400).json({ error: 'YouTube URL is required for YouTube mode' });
+        }
     }
 
     const jobId = Date.now().toString();
@@ -76,15 +98,31 @@ app.post('/api/generate', async (req, res) => {
         status: 'started',
         progress: 0,
         message: 'Initializing...',
-        startTime: new Date()
+        startTime: new Date(),
+        mode: isScriptMode ? 'script' : 'youtube'
     });
 
-    Logger.info(`✅ Job ${jobId} created and queued for processing`);
+    Logger.info(`✅ Job ${jobId} created and queued for processing (${isScriptMode ? 'script' : 'youtube'} mode)`);
 
-    // Start generation in background
-    generateVideoAsync(jobId, youtubeUrl, { startTime, endTime, thumbnailMemeUrl });
+    // Start generation in background based on mode
+    if (isScriptMode) {
+        generateScriptVideoAsync(jobId, scriptText, { 
+            voiceId: voiceId || 'voice1', 
+            musicSearch: musicSearch || 'ambient peaceful background music', 
+            photoSource: photoSource || 'pexels',
+            soundSource: soundSource || 'freesound',
+            database: database || 'other' // Use 'other' for script mode (CC0 photos)
+        });
+    } else {
+        generateVideoAsync(jobId, youtubeUrl, { 
+            startTime, 
+            endTime, 
+            thumbnailMemeUrl, 
+            database: database || 'apu' 
+        });
+    }
 
-    res.json({ jobId, message: 'Video generation started' });
+    res.json({ jobId, message: 'Video generation started', mode: isScriptMode ? 'script' : 'youtube' });
 });
 
 // Job status endpoint
@@ -173,6 +211,112 @@ app.get('/api/health', (req, res) => {
         activeJobs: activeJobs.size
     });
 });
+
+// Get available voices
+app.get('/api/voices', (req, res) => {
+    try {
+        const voiceInfo = generator.elevenLabsService.getVoiceInfo();
+        res.json(voiceInfo);
+    } catch (error) {
+        Logger.error('❌ Failed to get voice info:', error);
+        res.status(500).json({ error: 'Failed to get voice information' });
+    }
+});
+
+async function generateScriptVideoAsync(jobId, scriptText, options) {
+    // Update job status
+    const updateJob = (status, progress, message, outputPath = null) => {
+        try {
+            activeJobs.set(jobId, {
+                status,
+                progress,
+                message,
+                outputPath,
+                startTime: activeJobs.get(jobId)?.startTime || new Date(),
+                endTime: status === 'completed' || status === 'error' ? new Date() : null
+            });
+        } catch (err) {
+            Logger.error('Failed to update job status:', err);
+        }
+    };
+
+    try {
+        updateJob('running', 10, 'Initializing...');
+        
+        // Wrap the generator in a timeout to prevent hanging
+        const timeoutPromise = new Promise((_, reject) => {
+            setTimeout(() => reject(new Error('Generation timeout after 10 minutes')), 600000);
+        });
+        
+        // Create custom logger to update progress
+        const originalInfo = Logger.info;
+        const originalError = Logger.error;
+        
+        Logger.info = (message, data) => {
+            try {
+                originalInfo(message, data);
+                
+                // Update progress based on message content for script mode
+                if (message.includes('Step 1/7')) updateJob('running', 15, 'Generating speech...');
+                else if (message.includes('Step 2/7')) updateJob('running', 25, 'Downloading background music...');
+                else if (message.includes('Step 3/7')) updateJob('running', 35, 'Transcribing speech...');
+                else if (message.includes('Step 4/7')) updateJob('running', 50, 'Extracting keywords...');
+                else if (message.includes('Step 5/7')) updateJob('running', 65, 'Searching for memes...');
+                else if (message.includes('Meme search completed')) updateJob('running', 75, 'Memes collected! Creating slides...');
+                else if (message.includes('Step 6/7')) updateJob('running', 85, 'Rendering slides...');
+                else if (message.includes('Step 7/7')) updateJob('running', 90, 'Creating final video with mixed audio...');
+                else if (message.includes('Script-to-meme video generation completed')) updateJob('running', 95, 'Video complete! Preparing download...');
+                else if (message.includes('Generating speech')) updateJob('running', 12, 'Converting text to speech...');
+                else if (message.includes('Downloading background music')) updateJob('running', 20, 'Finding background music...');
+            } catch (err) {
+                originalInfo(message, data);
+            }
+        };
+
+        // Race between generation and timeout
+        const outputPath = await Promise.race([
+            (async () => {
+                try {
+                    return await generator.generateVideoFromScript(scriptText, options);
+                } catch (err) {
+                    Logger.error('Generator error:', err);
+                    throw err;
+                }
+            })(),
+            timeoutPromise
+        ]);
+        
+        // Restore original logger
+        Logger.info = originalInfo;
+        Logger.error = originalError;
+        
+        const filename = path.basename(outputPath);
+        updateJob('completed', 100, 'Script video generated successfully!', filename);
+        
+    } catch (error) {
+        // Restore original logger in case of error
+        Logger.info = Logger.info.originalInfo || Logger.info;
+        Logger.error = Logger.error.originalError || Logger.error;
+        
+        Logger.error(`Script video generation failed for job ${jobId}:`, error.message);
+        
+        // Determine error type for better user feedback
+        let userMessage = error.message;
+        if (error.message.includes('ELEVENLABS_API_KEY')) {
+            userMessage = 'ElevenLabs API key is missing or invalid. Please check configuration.';
+        } else if (error.message.includes('Failed to generate speech')) {
+            userMessage = 'Text-to-speech generation failed. Please try again or use shorter text.';
+        } else if (error.message.includes('Failed to download music')) {
+            userMessage = 'Background music download failed. Please try a different mood or try again.';
+        } else if (error.message.includes('timeout')) {
+            userMessage = 'Generation timed out. Try shorter script text.';
+        } else if (error.message.includes('network') || error.message.includes('ENOTFOUND')) {
+            userMessage = 'Network error. Please check your internet connection.';
+        }
+        
+        updateJob('error', 0, userMessage, null);
+    }
+}
 
 async function generateVideoAsync(jobId, youtubeUrl, options) {
     // Update job status
@@ -281,6 +425,7 @@ app.listen(PORT, () => {
     Logger.info('   📊 GET  /api/status/:jobId   - Check job status');
     Logger.info('   📡 GET  /api/stream/:jobId   - Real-time updates');
     Logger.info('   📥 GET  /api/download/:file  - Download generated video');
+    Logger.info('   🎭 GET  /api/voices          - Get available voice options');
     Logger.info('   🧹 POST /api/cleanup         - Clean up temporary files');
     Logger.info('   ❤️  GET  /api/health         - Health check');
     

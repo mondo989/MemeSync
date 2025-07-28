@@ -6,22 +6,47 @@ const Logger = require('./utils/logger');
 class PuppeteerScraper {
     constructor() {
         this.memesSiteUrl = process.env.MEME_SITE_URL;
+        this.boboSiteUrl = process.env.BOBO_SITE_URL;
         this.outputFile = path.join(__dirname, '../memes.json');
     }
 
     /**
      * Search for memes dynamically based on keywords from lyrics
      * @param {Array} keywords - Array of keyword strings to search for
+     * @param {string} database - Database to search ('apu', 'bobo', 'other')
      * @returns {Array} - Array of {keyword, memeUrl} objects
      */
-    async searchMemesForKeywords(keywords) {
+    async searchMemesForKeywords(keywords, database = 'apu') {
+        // Handle special case for "other" database - search for CC0 photos instead of memes
+        if (database.toLowerCase() === 'other') {
+            Logger.info(`📷 Using PHOTO search mode for ${keywords.length} keywords (CC0 photos from Pexels)`);
+            return await this.searchPhotosForKeywords(keywords);
+        }
+
+        // Validate database and get appropriate URL for meme databases
+        let siteUrl;
+        switch (database.toLowerCase()) {
+            case 'apu':
         if (!this.memesSiteUrl) {
             Logger.error('MEME_SITE_URL not configured in environment variables');
             throw new Error('MEME_SITE_URL required');
         }
+                siteUrl = this.memesSiteUrl;
+                break;
+            case 'bobo':
+                if (!this.boboSiteUrl) {
+                    Logger.error('BOBO_SITE_URL not configured in environment variables');
+                    throw new Error('BOBO_SITE_URL required');
+                }
+                siteUrl = this.boboSiteUrl;
+                break;
+            default:
+                throw new Error(`Unknown database: ${database}`);
+        }
 
-        Logger.info(`🎭 Starting isolated meme search for ${keywords.length} keywords`);
-        Logger.debug(`Meme site URL: ${this.memesSiteUrl}`);
+        Logger.info(`🎭 Starting isolated meme search for ${keywords.length} keywords using ${database.toUpperCase()} database`);
+        Logger.info(`🌐 Meme site URL: ${siteUrl}`);
+        Logger.info(`📋 Environment check - MEME_SITE_URL: ${this.memesSiteUrl ? 'SET' : 'NOT SET'}, BOBO_SITE_URL: ${this.boboSiteUrl ? 'SET' : 'NOT SET'}`);
         Logger.info('🔄 Using separate browser instances for complete isolation between searches');
         
         const results = [];
@@ -39,7 +64,7 @@ class PuppeteerScraper {
                 const maxRetries = 5; // Prevent infinite loops
                 
                 do {
-                    memeUrl = await this.searchSingleKeywordIsolated(keyword, selectedUrls);
+                    memeUrl = await this.searchSingleKeywordIsolated(keyword, selectedUrls, database, siteUrl);
                     retryCount++;
                     
                     if (selectedUrls.includes(memeUrl)) {
@@ -82,66 +107,141 @@ class PuppeteerScraper {
     }
 
     /**
+     * Search for CC0 photos from Pexels based on keywords
+     * @param {Array} keywords - Array of keyword strings to search for
+     * @returns {Array} - Array of {keyword, memeUrl} objects (memeUrl contains photo URL)
+     */
+    async searchPhotosForKeywords(keywords) {
+        Logger.info(`📷 Starting CC0 photo search for ${keywords.length} keywords from Pexels`);
+        Logger.info('🔄 Using separate browser instances for complete isolation between searches');
+        
+        const results = [];
+        const selectedUrls = []; // Track selected URLs to avoid duplicates
+
+        // Process each keyword with its own browser instance for complete isolation
+        for (let i = 0; i < keywords.length; i++) {
+            const keyword = keywords[i];
+            Logger.info(`📷 [${i + 1}/${keywords.length}] Searching photos for: "${keyword}"`);
+            
+            try {
+                // Search for a unique photo URL with retry logic to avoid duplicates
+                let photoUrl;
+                let retryCount = 0;
+                const maxRetries = 5; // Prevent infinite loops
+                
+                do {
+                    photoUrl = await this.searchSingleKeywordPhoto(keyword, selectedUrls);
+                    retryCount++;
+                    
+                    if (selectedUrls.includes(photoUrl)) {
+                        Logger.debug(`🔄 Duplicate photo URL found for "${keyword}" (attempt ${retryCount}/${maxRetries}), retrying...`);
+                        if (retryCount >= maxRetries) {
+                            Logger.warn(`⚠️ Max retries reached for "${keyword}", accepting duplicate URL`);
+                            break;
+                        }
+                    }
+                } while (selectedUrls.includes(photoUrl) && retryCount < maxRetries);
+                
+                // Add to selected URLs array and results
+                selectedUrls.push(photoUrl);
+                results.push({
+                    keyword: keyword,
+                    memeUrl: photoUrl // Using memeUrl field for compatibility, but contains photo URL
+                });
+                
+                Logger.success(`✅ Found unique photo for "${keyword}": ${photoUrl.substring(0, 80)}...`);
+                if (retryCount > 1) {
+                    Logger.info(`🎯 Required ${retryCount} attempts to find unique photo`);
+                }
+                
+                // Brief pause between searches to avoid overwhelming the server
+                if (i < keywords.length - 1) {
+                    Logger.debug(`⏱️  Brief pause before next photo search...`);
+                    await new Promise(resolve => setTimeout(resolve, 1000));
+                }
+                
+            } catch (error) {
+                Logger.error(`❌ Failed to search photos for "${keyword}": ${error.message}`);
+                Logger.debug('Error details:', error.stack);
+                throw new Error(`Photo search failed for keyword "${keyword}": ${error.message}`);
+            }
+        }
+        
+        Logger.success(`🎉 CC0 photo search completed! Found ${results.length} photos using separate browser instances`);
+        Logger.info(`🔒 Duplicate prevention: ${selectedUrls.length} unique URLs selected`);
+        return results;
+    }
+
+    /**
      * Search for a single keyword using an isolated browser instance
      * @param {string} keyword - Keyword to search for
      * @param {Array} selectedUrls - Array of already selected URLs to avoid duplicates
+     * @param {string} database - Database to search ('apu', 'bobo', 'other')
+     * @param {string} siteUrl - URL of the meme site
      * @returns {string} - Meme image URL
      */
-    async searchSingleKeywordIsolated(keyword, selectedUrls = []) {
+    async searchSingleKeywordIsolated(keyword, selectedUrls = [], database = 'apu', siteUrl = null) {
         let browser = null;
         
         try {
             Logger.debug(`🚀 Launching isolated browser for "${keyword}"...`);
             
             // Try multiple launch configurations for stability
-            const launchConfigs = [
-                {
-                    headless: 'new',
-                    executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-                    args: [
-                        '--no-sandbox',
-                        '--disable-setuid-sandbox',
-                        '--disable-dev-shm-usage',
-                        '--disable-gpu',
-                        '--disable-web-security',
+        const launchConfigs = [
+            {
+                headless: 'new',
+                executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+                args: [
+                    '--no-sandbox',
+                    '--disable-setuid-sandbox',
+                    '--disable-dev-shm-usage',
+                    '--disable-gpu',
+                    '--disable-web-security',
                         '--remote-debugging-port=0'
-                    ],
-                    timeout: 10000
-                },
-                {
-                    headless: 'new',
+                ],
+                timeout: 10000
+            },
+            {
+                headless: 'new',
                     args: ['--no-sandbox', '--disable-setuid-sandbox', '--remote-debugging-port=0'],
-                    timeout: 10000
-                }
-            ];
+                timeout: 10000
+            }
+        ];
 
-            let lastError = null;
+        let lastError = null;
             for (const config of launchConfigs) {
-                try {
+            try {
                     browser = await puppeteer.launch(config);
-                    break;
-                } catch (configError) {
-                    lastError = configError;
-                    if (browser) {
-                        try { await browser.close(); } catch {}
-                        browser = null;
-                    }
+                break;
+            } catch (configError) {
+                lastError = configError;
+                if (browser) {
+                    try { await browser.close(); } catch {}
+                    browser = null;
                 }
             }
+        }
 
-            if (!browser) {
-                throw new Error(`Browser launch failed: ${lastError?.message || 'Unknown error'}`);
-            }
+        if (!browser) {
+            throw new Error(`Browser launch failed: ${lastError?.message || 'Unknown error'}`);
+        }
 
             const page = await browser.newPage();
             await page.setUserAgent('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
             await page.setViewport({ width: 1280, height: 720 });
-
-            // Navigate to memes site
-            await page.goto(this.memesSiteUrl, { waitUntil: 'domcontentloaded', timeout: 10000 });
             
-            // Perform the search using the existing logic
-            return await this.searchSingleKeyword(page, keyword, selectedUrls);
+            // Navigate to memes site
+            const targetUrl = siteUrl || this.memesSiteUrl;
+            await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 10000 });
+            
+            // Perform the search using database-specific logic
+            if (database === 'bobo') {
+                Logger.info(`🐻 Using BOBO search method for "${keyword}"`);
+                return await this.searchSingleKeywordBobo(page, keyword, selectedUrls);
+            } else {
+                Logger.info(`🐸 Using APU search method for "${keyword}"`);
+                return await this.searchSingleKeyword(page, keyword, selectedUrls);
+            }
             
         } finally {
             if (browser) {
@@ -152,6 +252,232 @@ class PuppeteerScraper {
                     Logger.warn(`⚠️ Error closing browser for "${keyword}":`, closeError.message);
                 }
             }
+        }
+    }
+
+    /**
+     * Search for a single keyword on Bobo database and return a random meme URL
+     * @param {Page} page - Puppeteer page object
+     * @param {string} keyword - Keyword to search for
+     * @param {Array} selectedUrls - Array of already selected URLs to avoid duplicates
+     * @returns {string} - Meme image URL
+     */
+    async searchSingleKeywordBobo(page, keyword, selectedUrls = []) {
+        try {
+            Logger.debug(`🔍 Searching Bobo database for keyword: "${keyword}"`);
+            
+            // First, let's check if the page loaded correctly
+            Logger.debug('📄 Checking page status...');
+            const title = await page.title();
+            const url = page.url();
+            Logger.info(`📋 Page loaded - Title: "${title}", URL: ${url}`);
+            
+            // Check what elements are available on the page
+            const availableElements = await page.evaluate(() => {
+                const searchBtn = document.querySelector('#search-btn');
+                const searchInput = document.querySelector('#search-input');
+                const body = document.body;
+                return {
+                    hasSearchBtn: !!searchBtn,
+                    hasSearchInput: !!searchInput,
+                    searchBtnVisible: searchBtn ? !searchBtn.hidden : false,
+                    searchInputVisible: searchInput ? !searchInput.hidden : false,
+                    bodyContent: body ? body.innerHTML.substring(0, 500) : 'No body',
+                    allIds: Array.from(document.querySelectorAll('[id]')).map(el => el.id).slice(0, 10)
+                };
+            });
+            Logger.info(`🔍 Element check:`, availableElements);
+            
+            // Click search button first
+            Logger.debug('🎯 Clicking search button...');
+            
+            try {
+                await page.waitForSelector('#search-btn', { timeout: 5000 });
+                await page.click('#search-btn');
+                Logger.debug('✅ Search button clicked successfully');
+                
+                // Wait for search input to become visible/available after clicking search button
+                Logger.debug('⏳ Waiting for search input to become available...');
+                await page.waitForTimeout(3000); // Give UI time to transition
+                
+                // Check what elements are now available after clicking search button
+                const postClickElements = await page.evaluate(() => {
+                    const searchContainer = document.querySelector('#search-container');
+                    const searchForm = document.querySelector('#search-form');
+                    const searchInput = document.querySelector('#search-input');
+                    const body = document.body;
+                    
+                    return {
+                        searchContainer: searchContainer ? {
+                            visible: !searchContainer.hidden,
+                            display: window.getComputedStyle(searchContainer).display,
+                            innerHTML: searchContainer.innerHTML.substring(0, 300)
+                        } : null,
+                        searchForm: searchForm ? {
+                            visible: !searchForm.hidden,
+                            display: window.getComputedStyle(searchForm).display,
+                            innerHTML: searchForm.innerHTML.substring(0, 300)
+                        } : null,
+                        searchInput: searchInput ? {
+                            visible: !searchInput.hidden,
+                            display: window.getComputedStyle(searchInput).display,
+                            type: searchInput.type,
+                            placeholder: searchInput.placeholder
+                        } : null,
+                        allVisibleInputs: Array.from(document.querySelectorAll('input')).map(input => ({
+                            id: input.id,
+                            type: input.type,
+                            placeholder: input.placeholder,
+                            visible: window.getComputedStyle(input).display !== 'none'
+                        }))
+                    };
+                });
+                
+                Logger.info(`🔍 Post-click element analysis:`, postClickElements);
+                
+                // If search container is hidden, make it visible
+                if (postClickElements.searchContainer && postClickElements.searchContainer.display === 'none') {
+                    Logger.info(`🔧 Search container is hidden, making it visible...`);
+                    const containerMadeVisible = await page.evaluate(() => {
+                        const searchContainer = document.querySelector('#search-container');
+                        if (searchContainer) {
+                            searchContainer.style.display = 'block';
+                            return true;
+                        }
+                        return false;
+                    });
+                    
+                    if (containerMadeVisible) {
+                        Logger.debug('✅ Search container display set to block');
+                    }
+                    
+                    // Wait a moment for the change to take effect
+                    await page.waitForTimeout(1000);
+                }
+                
+            } catch (btnError) {
+                Logger.error(`❌ Failed to click search button: ${btnError.message}`);
+                
+                // Take a screenshot for debugging
+                try {
+                    const screenshotPath = path.join(__dirname, '../media', `bobo-debug-${Date.now()}.png`);
+                    await page.screenshot({ path: screenshotPath, fullPage: true });
+                    Logger.info(`📸 Debug screenshot saved: ${screenshotPath}`);
+                } catch (screenshotError) {
+                    Logger.warn(`Failed to take debug screenshot: ${screenshotError.message}`);
+                }
+                
+                throw new Error(`Search button not found or clickable: ${btnError.message}`);
+            }
+            
+            // Wait for search input to be available and click it
+            Logger.debug('🎯 Clicking search input...');
+            
+            try {
+                // Now the search input should be available - wait for it and click it
+                await page.waitForSelector('#search-input', { visible: true, timeout: 5000 });
+                Logger.debug('✅ Search input found and visible');
+                
+                await page.click('#search-input');
+                Logger.debug('✅ Search input clicked successfully');
+                
+                // Additional check to ensure input is ready
+                await page.waitForTimeout(500);
+                
+            } catch (inputError) {
+                Logger.error(`❌ Failed to click search input: ${inputError.message}`);
+                
+                // Take a screenshot for debugging
+                try {
+                    const screenshotPath = path.join(__dirname, '../media', `bobo-input-debug-${Date.now()}.png`);
+                    await page.screenshot({ path: screenshotPath, fullPage: true });
+                    Logger.info(`📸 Input debug screenshot saved: ${screenshotPath}`);
+                } catch (screenshotError) {
+                    Logger.warn(`Failed to take input debug screenshot: ${screenshotError.message}`);
+                }
+                
+                throw new Error(`Search input not found or clickable: ${inputError.message}`);
+            }
+            
+            // Clear any existing content and type the keyword
+            Logger.debug(`⌨️ Typing keyword: "${keyword}"`);
+            
+            // Clear the input field first
+            await page.evaluate(() => {
+                const searchInput = document.querySelector('#search-input');
+                if (searchInput) {
+                    searchInput.value = '';
+                    searchInput.focus(); // Ensure focus
+                }
+            });
+                    
+            // Type the keyword
+            await page.type('#search-input', keyword, { delay: 50 }); // Add small delay between keystrokes
+            Logger.debug(`✅ Typed keyword: "${keyword}"`);
+            
+            // Press Enter to submit search
+            Logger.debug('📤 Pressing Enter to submit search...');
+            await page.keyboard.press('Enter');
+            Logger.debug('✅ Search submitted with Enter key');
+            
+            // Wait for results to load
+            Logger.debug('⏱️ Waiting for search results...');
+            await page.waitForTimeout(3000); // Give time for results to load
+            
+            // Try to wait for gallery with media items
+            try {
+                await page.waitForSelector('#gallery .media-item', { timeout: 8000 });
+            } catch (waitError) {
+                Logger.debug('Using fallback wait for results');
+                await page.waitForTimeout(2000);
+            }
+            
+            // Extract meme URLs from gallery
+            Logger.debug('🖼️ Extracting meme URLs from Bobo gallery...');
+            const memeUrls = await page.evaluate(() => {
+                const mediaItems = document.querySelectorAll('#gallery .media-item img');
+                const urls = [];
+                
+                mediaItems.forEach(img => {
+                    if (img.src && img.src.startsWith('http')) {
+                        urls.push(img.src);
+                    }
+                });
+                
+                return [...new Set(urls)]; // Remove duplicates
+            });
+            
+            Logger.debug(`📊 Found ${memeUrls.length} Bobo meme images for "${keyword}"`);
+            
+            if (memeUrls.length === 0) {
+                throw new Error(`No Bobo memes found for keyword: "${keyword}"`);
+            }
+            
+            // BOBO-SPECIFIC LOGIC: Only select from first 4 memes, allow duplicates
+            const maxMemes = 4;
+            const limitedMemes = memeUrls.slice(0, maxMemes);
+            Logger.debug(`🐻 Bobo logic: Using first ${limitedMemes.length} memes (max ${maxMemes}) from ${memeUrls.length} total results`);
+            
+            // Try to find unique URLs from the first 4, but allow duplicates if needed
+            const uniqueUrls = limitedMemes.filter(url => !selectedUrls.includes(url));
+            const urlsToChooseFrom = uniqueUrls.length > 0 ? uniqueUrls : limitedMemes;
+            
+            // Randomly select one meme URL from the limited set
+            const randomIndex = Math.floor(Math.random() * urlsToChooseFrom.length);
+            const selectedUrl = urlsToChooseFrom[randomIndex];
+            
+            if (uniqueUrls.length > 0) {
+                Logger.debug(`🎲 Bobo selection: Chose unique URL ${randomIndex + 1}/${uniqueUrls.length} from first ${maxMemes} memes`);
+            } else {
+                Logger.debug(`🎲 Bobo selection: Chose duplicate URL ${randomIndex + 1}/${limitedMemes.length} from first ${maxMemes} memes (allowing duplicates)`);
+            }
+            
+            return selectedUrl;
+            
+        } catch (error) {
+            Logger.error(`❌ Error searching Bobo database for "${keyword}": ${error.message}`);
+            Logger.debug('Detailed error:', error.stack);
+            throw error;
         }
     }
 
@@ -349,6 +675,181 @@ class PuppeteerScraper {
             Logger.error(`❌ Error searching for "${keyword}": ${error.message}`);
             Logger.debug('Detailed error:', error.stack);
             throw error;
+        }
+    }
+
+    /**
+     * Search for a single keyword photo from Pexels using an isolated browser instance
+     * @param {string} keyword - Keyword to search for
+     * @param {Array} selectedUrls - Array of already selected URLs to avoid duplicates
+     * @returns {string} - Photo image URL
+     */
+    async searchSingleKeywordPhoto(keyword, selectedUrls = []) {
+        let browser = null;
+        
+        try {
+            Logger.debug(`🚀 Launching isolated browser for photo search: "${keyword}"`);
+            
+            // Try multiple launch configurations for stability (same as music service)
+            const launchConfigs = [
+                {
+                    headless: 'new',
+                    executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+                    args: [
+                        '--no-sandbox',
+                        '--disable-setuid-sandbox',
+                        '--disable-dev-shm-usage',
+                        '--disable-gpu',
+                        '--disable-web-security',
+                        '--remote-debugging-port=0'
+                    ],
+                    timeout: 10000
+                },
+                {
+                    headless: 'new',
+                    args: ['--no-sandbox', '--disable-setuid-sandbox', '--remote-debugging-port=0'],
+                    timeout: 10000
+                }
+            ];
+
+            let lastError = null;
+            for (const config of launchConfigs) {
+                try {
+                    browser = await puppeteer.launch(config);
+                    break;
+                } catch (configError) {
+                    lastError = configError;
+                    if (browser) {
+                        try { await browser.close(); } catch {}
+                        browser = null;
+                    }
+                }
+            }
+
+            if (!browser) {
+                throw new Error(`Photo browser launch failed: ${lastError?.message || 'Unknown error'}`);
+            }
+
+            const page = await browser.newPage();
+            await page.setUserAgent('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
+            await page.setViewport({ width: 1280, height: 720 });
+            
+            // Navigate to Pexels search
+            const searchUrl = `https://www.pexels.com/search/${encodeURIComponent(keyword)}`;
+            Logger.debug(`📷 Navigating to Pexels: ${searchUrl}`);
+            await page.goto(searchUrl, { waitUntil: 'domcontentloaded', timeout: 15000 });
+            
+            // Wait for images to load
+            Logger.debug('⏳ Waiting for Pexels images to load...');
+            await page.waitForTimeout(4000); // Increased wait time for Pexels
+            
+            // Try to wait for the grid container and items
+            try {
+                await page.waitForSelector('[class*="RowGrid_gridContainer"]', { timeout: 10000 });
+                Logger.debug('✅ Found Pexels grid container');
+            } catch (waitError) {
+                Logger.debug('Using fallback wait for Pexels grid');
+                await page.waitForTimeout(3000);
+            }
+            
+            // Wait for grid items to be present
+            try {
+                await page.waitForSelector('[class*="RowItem_gridItem"]', { timeout: 8000 });
+                Logger.debug('✅ Found Pexels grid items');
+            } catch (waitError) {
+                Logger.debug('Using fallback wait for Pexels items');
+                await page.waitForTimeout(2000);
+            }
+            
+            // Extract image URLs from Pexels
+            Logger.debug('🖼️ Extracting photo URLs from Pexels...');
+            const photoUrls = await page.evaluate(() => {
+                // Look for grid items with the specific class pattern
+                const gridItems = document.querySelectorAll('[class*="RowItem_gridItem"]');
+                const urls = [];
+                
+                console.log(`[PEXELS-EVAL] Found ${gridItems.length} grid items`);
+                
+                gridItems.forEach((item, index) => {
+                    // Find img elements within each grid item
+                    const images = item.querySelectorAll('img[src*="pexels.com"]');
+                    
+                    images.forEach(img => {
+                        if (img.srcset && img.src && img.src.includes('pexels.com')) {
+                            // Extract the 1200w URL from srcset
+                            const srcset = img.srcset;
+                            
+                            // Look for the 1200w version in the srcset
+                            const match = srcset.match(/([^,\s]+)\s+1200w/);
+                            if (match && match[1]) {
+                                let photoUrl = match[1];
+                                
+                                // Clean up any HTML entities
+                                photoUrl = photoUrl.replace(/&amp;/g, '&');
+                                
+                                console.log(`[PEXELS-EVAL] Found 1200w image: ${photoUrl.substring(0, 60)}...`);
+                                urls.push(photoUrl);
+                            } else {
+                                // Fallback: use the main src and modify it for higher resolution
+                                let photoUrl = img.src.replace(/&amp;/g, '&');
+                                
+                                // Try to get a higher resolution version
+                                if (photoUrl.includes('w=500')) {
+                                    photoUrl = photoUrl.replace('w=500', 'w=1200');
+                                } else if (photoUrl.includes('dpr=1')) {
+                                    photoUrl = photoUrl.replace('dpr=1', 'dpr=2');
+                                }
+                                
+                                console.log(`[PEXELS-EVAL] Using fallback image: ${photoUrl.substring(0, 60)}...`);
+                                urls.push(photoUrl);
+                            }
+                        }
+                    });
+                });
+                
+                console.log(`[PEXELS-EVAL] Total URLs extracted: ${urls.length}`);
+                return [...new Set(urls)]; // Remove duplicates
+            });
+            
+            Logger.debug(`📊 Found ${photoUrls.length} Pexels photos for "${keyword}"`);
+            
+            if (photoUrls.length === 0) {
+                throw new Error(`No Pexels photos found for keyword: "${keyword}"`);
+            }
+            
+            // Filter out already selected URLs to prioritize unique selections
+            const uniqueUrls = photoUrls.filter(url => !selectedUrls.includes(url));
+            
+            // Use unique URLs if available, otherwise fall back to all URLs
+            const urlsToChooseFrom = uniqueUrls.length > 0 ? uniqueUrls : photoUrls;
+            
+            // Randomly select one photo URL
+            const randomIndex = Math.floor(Math.random() * urlsToChooseFrom.length);
+            const selectedUrl = urlsToChooseFrom[randomIndex];
+            
+            if (uniqueUrls.length > 0) {
+                Logger.debug(`🎲 Random selection from ${uniqueUrls.length} unique Pexels URLs: ${randomIndex + 1}/${uniqueUrls.length}`);
+            } else {
+                Logger.debug(`🎲 Random selection from ${photoUrls.length} total Pexels URLs (no unique options): ${randomIndex + 1}/${photoUrls.length}`);
+            }
+            
+            Logger.debug(`🔗 Selected photo URL: ${selectedUrl.substring(0, 80)}...`);
+            
+            return selectedUrl;
+            
+        } catch (error) {
+            Logger.error(`❌ Error searching Pexels photos for "${keyword}": ${error.message}`);
+            Logger.debug('Detailed error:', error.stack);
+            throw error;
+        } finally {
+            if (browser) {
+                try {
+                    await browser.close();
+                    Logger.debug(`🔒 Closed isolated browser for photo search: "${keyword}"`);
+                } catch (closeError) {
+                    Logger.warn(`⚠️ Error closing photo browser for "${keyword}":`, closeError.message);
+                }
+            }
         }
     }
 

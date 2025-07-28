@@ -8,6 +8,9 @@ const MemesMatcher = require('./matchMemes');
 const SlideRenderer = require('./renderSlides');
 const VideoRenderer = require('./renderVideo');
 const PuppeteerScraper = require('./puppeteerScraper');
+const ElevenLabsService = require('./elevenLabsService');
+const MusicDownloadService = require('./musicDownloadService');
+const path = require('path'); // Added for path.join
 
 class MemeVideoGenerator {
     constructor() {
@@ -17,6 +20,8 @@ class MemeVideoGenerator {
         this.slideRenderer = new SlideRenderer();
         this.videoRenderer = new VideoRenderer();
         this.puppeteerScraper = new PuppeteerScraper();
+        this.elevenLabsService = new ElevenLabsService();
+        this.musicDownloadService = new MusicDownloadService();
     }
 
     /**
@@ -77,7 +82,7 @@ class MemeVideoGenerator {
                         // Step 5: Search for memes dynamically using Puppeteer
             Logger.info('🎭 Step 4/6: Searching for memes...');
             const keywords = keywordData.map(item => item.keyword);
-            const memeResults = await this.puppeteerScraper.searchMemesForKeywords(keywords);
+            const memeResults = await this.puppeteerScraper.searchMemesForKeywords(keywords, options.database || 'apu');
 
             Logger.success(`🎭 Meme search completed! Found memes for ${memeResults.length} keywords`);
             
@@ -111,7 +116,7 @@ class MemeVideoGenerator {
 
             // Step 4.5: Split long segments into multiple memes
             Logger.info('⏱️  Checking for long segments that need multiple memes...');
-            const expandedMemes = await this.expandLongSegments(matchedMemes);
+            const expandedMemes = await this.expandLongSegments(matchedMemes, options.database || 'apu');
             
             if (expandedMemes.length > matchedMemes.length) {
                 Logger.info(`📈 Expanded ${matchedMemes.length} segments to ${expandedMemes.length} meme slots for better coverage`);
@@ -119,11 +124,11 @@ class MemeVideoGenerator {
 
             // Step 5: Render slides
             Logger.info('🖼️  Step 5/6: Rendering slides...');
-            const slides = await this.slideRenderer.renderSlides(expandedMemes, thumbnailMemeUrl);
+            const slides = await this.slideRenderer.renderSlides(expandedMemes, thumbnailMemeUrl, options.database || 'apu');
 
             // Step 6: Create final video
             Logger.info('🎥 Step 6/6: Creating final video...');
-            const outputPath = await this.videoRenderer.createVideo(slides, audioPath);
+            const outputPath = await this.videoRenderer.createVideo(slides, audioPath, options.database || 'apu');
 
             // Get video info
             const videoInfo = await this.videoRenderer.getVideoInfo(outputPath);
@@ -137,6 +142,126 @@ class MemeVideoGenerator {
 
         } catch (error) {
             Logger.error('❌ Video generation failed:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Generate meme video from script text using ElevenLabs TTS
+     * @param {string} scriptText - Script text to convert to speech
+     * @param {Object} options - Generation options
+     * @returns {Promise<string>} - Path to generated video
+     */
+    async generateVideoFromScript(scriptText, options = {}) {
+        const {
+            voiceId = 'voice1',
+            musicSearch = 'ambient peaceful background music',
+            photoSource = 'unsplash',
+            soundSource = 'freesound',
+            database = 'apu'
+        } = options;
+
+        Logger.info('🎬 Starting Script-to-Meme Video Generation');
+        Logger.info(`Script length: ${scriptText.length} characters`);
+        Logger.info(`Voice: ${voiceId}, Music search: "${musicSearch}", Photo source: ${photoSource}, Sound source: ${soundSource}, Database: ${database}`);
+
+        try {
+            // Step 1: Ensure we have memes database
+            await this.ensureMemesDatabase();
+
+            // Step 2: Generate speech from script
+            Logger.info('🗣️ Step 1/7: Generating speech from script...');
+            const speechPath = await this.elevenLabsService.generateSpeech(scriptText, voiceId);
+
+            // Step 3: Download background music
+            Logger.info('🎵 Step 2/7: Downloading background music...');
+            const musicPath = await this.musicDownloadService.downloadMusicBySearchTerms(musicSearch);
+
+            // Step 4: Transcribe the generated speech
+            Logger.info('🎤 Step 3/7: Transcribing generated speech...');
+            const transcript = await this.transcriptionService.transcribeAudioFile(speechPath);
+            
+            if (transcript.length === 0) {
+                throw new Error('No transcript generated from speech - cannot proceed');
+            }
+
+            // Step 5: Extract keywords from transcript
+            Logger.info('🔍 Step 4/7: Extracting keywords...');
+            const keywordData = await this.keywordExtractor.extractKeywords(transcript);
+
+            // Log the extracted lyrics for review
+            Logger.success('📝 Speech transcription completed!');
+            Logger.info('Transcribed speech segments:');
+            transcript.forEach((segment, index) => {
+                Logger.info(`  ${index + 1}. [${segment.start.toFixed(1)}s-${segment.end.toFixed(1)}s] "${segment.text}"`);
+            });
+
+            Logger.info('\nExtracted keywords:');
+            keywordData.forEach((item, index) => {
+                Logger.info(`  ${index + 1}. "${item.keyword}" from: "${item.text}"`);
+            });
+
+            // Step 6: Search for memes dynamically using Puppeteer
+            Logger.info('🎭 Step 5/7: Searching for memes...');
+            const keywords = keywordData.map(item => item.keyword);
+            const memeResults = await this.puppeteerScraper.searchMemesForKeywords(keywords, database);
+
+            Logger.success(`🎭 Meme search completed! Found memes for ${memeResults.length} keywords`);
+            
+            // Validate array lengths match
+            if (keywordData.length !== memeResults.length) {
+                throw new Error(`Mismatch: ${keywordData.length} keywords but ${memeResults.length} meme results`);
+            }
+            
+            // Combine keyword data with meme results using index-based mapping
+            const matchedMemes = keywordData.map((item, index) => {
+                const memeResult = memeResults[index];
+                if (!memeResult) {
+                    throw new Error(`No meme found at index ${index} for keyword: ${item.keyword}`);
+                }
+                return {
+                    ...item,
+                    meme: {
+                        url: memeResult.memeUrl,
+                        keywords: [item.keyword]
+                    }
+                };
+            });
+
+            Logger.success(`🎭 Meme collection completed! Found memes for ${matchedMemes.length} keywords`);
+            Logger.info('📋 Collected memes summary:');
+            matchedMemes.forEach((item, index) => {
+                Logger.debug(`${index + 1}. "${item.keyword}" → ${item.meme.url.substring(0, 60)}...`);
+            });
+
+            // Step 6.5: Split long segments into multiple memes
+            Logger.info('⏱️  Checking for long segments that need multiple memes...');
+            const expandedMemes = await this.expandLongSegments(matchedMemes, database);
+            
+            if (expandedMemes.length > matchedMemes.length) {
+                Logger.info(`📈 Expanded ${matchedMemes.length} segments to ${expandedMemes.length} meme slots for better coverage`);
+            }
+
+            // Step 7: Render slides
+            Logger.info('🖼️  Step 6/7: Rendering slides...');
+            const slides = await this.slideRenderer.renderSlides(expandedMemes, null, database);
+
+            // Step 8: Create final video with mixed audio (speech + background music)
+            Logger.info('🎥 Step 7/7: Creating final video with mixed audio...');
+            const outputPath = await this.videoRenderer.createVideoWithMixedAudio(slides, speechPath, musicPath, database);
+
+            // Get video info
+            const videoInfo = await this.videoRenderer.getVideoInfo(outputPath);
+            
+            Logger.success('🎉 Script-to-meme video generation completed!');
+            Logger.success(`📁 Output: ${outputPath}`);
+            Logger.success(`⏱️  Duration: ${Math.round(videoInfo.duration)}s`);
+            Logger.success(`📊 Size: ${Math.round(videoInfo.size / 1024 / 1024)}MB`);
+
+            return outputPath;
+
+        } catch (error) {
+            Logger.error('❌ Script video generation failed:', error);
             throw error;
         }
     }
@@ -213,7 +338,9 @@ class MemeVideoGenerator {
         try {
             await Promise.all([
                 this.slideRenderer.cleanup(),
-                this.videoRenderer.cleanup()
+                this.videoRenderer.cleanup(),
+                this.musicDownloadService.cleanup(),
+                this.cleanupGeneratedFiles()
             ]);
             
             Logger.success('✅ Cleanup completed');
@@ -223,11 +350,31 @@ class MemeVideoGenerator {
     }
 
     /**
+     * Clean up generated speech and music files
+     */
+    async cleanupGeneratedFiles() {
+        try {
+            const mediaDir = path.join(__dirname, '../media');
+            const fs = require('fs');
+            
+            if (fs.existsSync(mediaDir)) {
+                // Clean up old generated files
+                await this.elevenLabsService.cleanupOldSpeechFiles(mediaDir);
+                await this.musicDownloadService.cleanupOldMusicFiles();
+                Logger.info('🗑️ Generated files cleaned up');
+            }
+        } catch (error) {
+            Logger.warn('⚠️ Failed to cleanup generated files:', error.message);
+        }
+    }
+
+    /**
      * Expand long segments (>5s) into multiple sub-segments with different memes
      * @param {Array} matchedMemes - Array of matched meme objects with timing
+     * @param {string} database - Database to search ('apu', 'bobo', 'other')
      * @returns {Array} - Expanded array with sub-segments for long durations
      */
-    async expandLongSegments(matchedMemes) {
+    async expandLongSegments(matchedMemes, database = 'apu') {
         const expandedMemes = [];
         const maxSegmentDuration = 5.0; // 5 seconds max per meme
         const minSegmentDuration = 3.0; // 3 seconds minimum per meme
@@ -260,7 +407,7 @@ class MemeVideoGenerator {
             Logger.debug(`  Creating ${numSegments} sub-segments with minimum ${minSegmentDuration}s duration`);
 
             // Get additional memes for this keyword
-            const additionalMemes = await this.getAdditionalMemesForKeyword(meme.keyword, numSegments);
+            const additionalMemes = await this.getAdditionalMemesForKeyword(meme.keyword, numSegments, database);
             
             // Create sub-segments
             for (let i = 0; i < numSegments; i++) {
@@ -302,9 +449,10 @@ class MemeVideoGenerator {
      * Get additional memes for a keyword to use in sub-segments
      * @param {string} keyword - The keyword to search for
      * @param {number} count - Number of memes needed
+     * @param {string} database - Database to search ('apu', 'bobo', 'other')
      * @returns {Array} - Array of meme URLs
      */
-    async getAdditionalMemesForKeyword(keyword, count) {
+    async getAdditionalMemesForKeyword(keyword, count, database = 'apu') {
         try {
             Logger.debug(`🔄 Getting ${count} additional memes for "${keyword}"`);
             
@@ -312,7 +460,7 @@ class MemeVideoGenerator {
             const keywords = Array(count).fill(keyword);
             
             // Search for multiple memes of the same keyword
-            const memeResults = await this.puppeteerScraper.searchMemesForKeywords(keywords);
+            const memeResults = await this.puppeteerScraper.searchMemesForKeywords(keywords, database);
             
             // Extract just the URLs
             const urls = memeResults.map(result => result.memeUrl);

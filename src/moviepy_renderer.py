@@ -22,7 +22,7 @@ except ImportError as e:
     print("Please install MoviePy with: pip3 install moviepy")
     sys.exit(1)
 
-def create_meme_video(slides_data, audio_path, output_path):
+def create_meme_video(slides_data, audio_path, output_path, database='apu'):
     """
     Create video with precise timing and smooth transitions using MoviePy
     
@@ -30,6 +30,7 @@ def create_meme_video(slides_data, audio_path, output_path):
         slides_data: List of slide objects with timing and image paths
         audio_path: Path to audio file
         output_path: Output video path
+        database: Database type ('apu', 'bobo', 'other') for opening slide selection
     """
     
     print(f"🎬 MoviePy: Creating video with {len(slides_data)} slides")
@@ -58,11 +59,23 @@ def create_meme_video(slides_data, audio_path, output_path):
         
         # Create opening slide if logo exists and there's a gap before first slide
         video_clips = []
-        # Look for apu-slide.png first, then apu-logo.svg
-        slide_logo_path = os.path.join(os.path.dirname(slides_data[0]['path']), 'apu-slide.png')
-        logo_path = os.path.join(os.path.dirname(slides_data[0]['path']), 'apu-logo.svg')
         
-        opening_image_path = slide_logo_path if os.path.exists(slide_logo_path) else (logo_path if os.path.exists(logo_path) else None)
+        # Look for database-specific slide first, then logo (original logic but database-aware)
+        slides_dir = os.path.dirname(slides_data[0]['path'])
+        opening_image_path = None
+        
+        if database == 'bobo':
+            slide_logo_path = os.path.join(slides_dir, 'bobo-slide.png')
+            logo_path = os.path.join(slides_dir, 'bobo-logo.png')
+            opening_image_path = slide_logo_path if os.path.exists(slide_logo_path) else (logo_path if os.path.exists(logo_path) else None)
+        elif database == 'apu':
+            slide_logo_path = os.path.join(slides_dir, 'apu-slide.png')
+            logo_path = os.path.join(slides_dir, 'apu-logo.svg')
+            opening_image_path = slide_logo_path if os.path.exists(slide_logo_path) else (logo_path if os.path.exists(logo_path) else None)
+        elif database == 'other':
+            # Skip opening slide for 'other' database (CC0 photos) - start directly with content
+            opening_image_path = None
+            print(f"  ℹ️  Skipping opening slide for 'other' database - starting with content directly")
         
         if opening_image_path and opening_duration > 0:
             try:
@@ -107,7 +120,11 @@ def create_meme_video(slides_data, audio_path, output_path):
                 print(f"  ⚠️  Failed to create opening slide: {e}")
         else:
             if not opening_image_path:
-                print(f"  ℹ️  No opening image found (looked for apu-slide.png and apu-logo.svg)")
+                if database == 'bobo':
+                    print(f"  ℹ️  No opening image found (looked for bobo-slide.png and bobo-logo.png)")
+                elif database == 'apu':
+                    print(f"  ℹ️  No opening image found (looked for apu-slide.png and apu-logo.svg)")
+                # For 'other' database, we intentionally skip opening image, so no message needed
             else:
                 print(f"  ℹ️  No gap before first slide ({first_slide_start:.3f}s), skipping opening slide")
         
@@ -330,6 +347,7 @@ def main():
     parser.add_argument('--slides', required=True, help='JSON file with slides data')
     parser.add_argument('--audio', required=True, help='Path to audio file')
     parser.add_argument('--output', required=True, help='Output video path')
+    parser.add_argument('--database', default='apu', help='Database type (apu, bobo, other) for opening slide selection')
     
     args = parser.parse_args()
     
@@ -342,7 +360,7 @@ def main():
         sys.exit(1)
     
     # Create video
-    success = create_meme_video(slides_data, args.audio, args.output)
+    success = create_meme_video(slides_data, args.audio, args.output, args.database)
     
     if success:
         sys.exit(0)

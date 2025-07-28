@@ -97,7 +97,7 @@ class VideoRenderer {
             
             const output = await youtubedl(youtubeUrl, {
                 extractAudio: true,
-                audioFormat: 'wav',  // Use WAV instead of MP3 for better compatibility
+                audioFormat: 'm4a',  // Use m4a format like original
                 audioQuality: '0',   // Best quality
                 output: tempAudioPath,
                 noPlaylist: true,
@@ -204,9 +204,10 @@ class VideoRenderer {
      * Create video from slides and audio
      * @param {Array} slides - Array of slide objects with timing info
      * @param {string} audioPath - Path to audio file
+     * @param {string} database - Database type ('apu', 'bobo', 'other') for opening slide selection
      * @returns {Promise<string>} - Path to output video
      */
-    async createVideo(slides, audioPath = null) {
+    async createVideo(slides, audioPath = null, database = 'apu') {
         await this.initialize();
 
         const finalAudioPath = audioPath || this.audioPath;
@@ -224,7 +225,7 @@ class VideoRenderer {
                 const duration = slide.endTime - slide.startTime;
                 Logger.info(`  ${index + 1}. ${slide.startTime.toFixed(1)}s-${slide.endTime.toFixed(1)}s (${duration.toFixed(1)}s)`);
             });
-            await this.createTimedSlideshow(slides, finalAudioPath);
+            await this.createTimedSlideshow(slides, finalAudioPath, database);
             
             Logger.success(`Video created successfully: ${this.outputPath}`);
             return this.outputPath;
@@ -233,6 +234,104 @@ class VideoRenderer {
             Logger.error('Failed to create video:', error);
             throw error;
         }
+    }
+
+    /**
+     * Create video with mixed audio (speech + background music)
+     * @param {Array} slides - Array of slide objects
+     * @param {string} speechPath - Path to speech audio file
+     * @param {string} musicPath - Path to background music file
+     * @param {string} database - Database name for output naming
+     * @returns {Promise<string>} - Path to generated video
+     */
+    async createVideoWithMixedAudio(slides, speechPath, musicPath, database = 'apu') {
+        await this.initialize();
+
+        Logger.info(`Creating video with mixed audio - ${slides.length} slides`);
+        Logger.info(`Speech: ${speechPath}`);
+        Logger.info(`Music: ${musicPath}`);
+
+        try {
+            // Check if both audio files exist
+            await fs.access(speechPath);
+            await fs.access(musicPath);
+            
+            // Get speech duration to determine video length
+            const speechDuration = await this.getAudioDuration(speechPath);
+            Logger.info(`Creating video with ${slides.length} slides over ${speechDuration}s speech`);
+            
+            // Create mixed audio first
+            const mixedAudioPath = await this.createMixedAudio(speechPath, musicPath, speechDuration);
+            
+            // Create video with mixed audio
+            await this.createTimedSlideshow(slides, mixedAudioPath, database);
+            
+            Logger.success(`Video with mixed audio created successfully: ${this.outputPath}`);
+            return this.outputPath;
+
+        } catch (error) {
+            Logger.error('Failed to create video with mixed audio:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Create mixed audio combining speech and background music
+     * @param {string} speechPath - Path to speech audio file
+     * @param {string} musicPath - Path to background music file
+     * @param {number} duration - Target duration in seconds
+     * @returns {Promise<string>} - Path to mixed audio file
+     */
+    async createMixedAudio(speechPath, musicPath, duration) {
+        const mixedAudioPath = path.join(this.mediaDir, `mixed_audio_${Date.now()}.mp3`);
+        
+        Logger.info('Creating mixed audio track...');
+        
+        return new Promise((resolve, reject) => {
+            // Create complex filter for mixing audio
+            const filterComplex = [
+                // Loop/extend music to match speech duration if needed
+                '[1:a]aloop=loop=-1:size=2e+09[music_loop]',
+                
+                // Adjust volumes: speech at full volume, music at 25% volume
+                '[0:a]volume=1.0[speech_vol]',
+                '[music_loop]volume=0.25[music_vol]',
+                
+                // Mix the audio streams
+                '[speech_vol][music_vol]amix=inputs=2:duration=shortest[mixed]'
+            ].join(';');
+
+            let command = ffmpeg()
+                .input(speechPath)    // Input 0: speech
+                .input(musicPath)     // Input 1: music
+                .complexFilter(filterComplex, 'mixed')
+                .outputOptions([
+                    '-c:a mp3',
+                    '-b:a 192k',
+                    '-ac 2',
+                    '-ar 44100'
+                ])
+                .duration(duration)   // Limit to speech duration
+                .output(mixedAudioPath)
+                .on('start', (commandLine) => {
+                    Logger.debug('Mixed audio FFmpeg command:', commandLine);
+                })
+                .on('progress', (progress) => {
+                    if (progress.percent) {
+                        Logger.info(`Audio mixing progress: ${Math.round(progress.percent)}%`);
+                    }
+                })
+                .on('end', () => {
+                    Logger.success(`Mixed audio created: ${mixedAudioPath}`);
+                    resolve(mixedAudioPath);
+                })
+                .on('error', (error) => {
+                    Logger.error('Audio mixing failed:', error);
+                    reject(error);
+                });
+
+            command.run();
+        });
     }
 
     /**
@@ -361,8 +460,9 @@ class VideoRenderer {
      * Create timed slideshow with specific slide durations based on lyrics timing
      * @param {Array} slides - Array of slide objects with startTime/endTime
      * @param {string} audioPath - Path to audio file
+     * @param {string} database - Database type ('apu', 'bobo', 'other') for opening slide selection
      */
-    async createTimedSlideshow(slides, audioPath) {
+    async createTimedSlideshow(slides, audioPath, database = 'apu') {
         Logger.info(`Creating precisely timed slideshow with ${slides.length} slides`);
         
         // Log exact timing for each slide  
@@ -389,7 +489,7 @@ class VideoRenderer {
             Logger.info('🐍 Using MoviePy for precise video rendering...');
             
             // Call MoviePy renderer
-            await this.renderWithMoviePy(slidesDataPath, audioPath);
+            await this.renderWithMoviePy(slidesDataPath, audioPath, database);
             
             // Clean up temp files
             try {
@@ -410,8 +510,9 @@ class VideoRenderer {
      * Render video using MoviePy Python script
      * @param {string} slidesDataPath - Path to slides JSON data
      * @param {string} audioPath - Path to audio file
+     * @param {string} database - Database type ('apu', 'bobo', 'other') for opening slide selection
      */
-    async renderWithMoviePy(slidesDataPath, audioPath) {
+    async renderWithMoviePy(slidesDataPath, audioPath, database = 'apu') {
         return new Promise((resolve, reject) => {
             const { spawn } = require('child_process');
             
@@ -428,7 +529,8 @@ class VideoRenderer {
                 pythonScript,
                 '--slides', slidesDataPath,
                 '--audio', audioPath,
-                '--output', this.outputPath
+                '--output', this.outputPath,
+                '--database', database
             ], {
                 stdio: ['pipe', 'pipe', 'pipe']
             });
