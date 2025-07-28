@@ -55,7 +55,7 @@ app.get('/', (req, res) => {
 
 // Generate video endpoint (supports both YouTube and script modes)
 app.post('/api/generate', async (req, res) => {
-    const { youtubeUrl, scriptText, voiceId, musicSearch, photoSource, soundSource, startTime, endTime, thumbnailMemeUrl, database } = req.body;
+    const { youtubeUrl, scriptText, voiceId, musicSearch, photoSource, soundSource, startTime, endTime, thumbnailMemeUrl, database, processingMode, preselectedKeywords } = req.body;
     
     // Determine mode based on input
     const isScriptMode = scriptText && scriptText.trim().length > 0;
@@ -71,6 +71,7 @@ app.post('/api/generate', async (req, res) => {
         startTime,
         endTime,
         database: database || 'apu',
+        processingMode: processingMode || 'quick',
         ip: req.ip
     });
     
@@ -111,14 +112,17 @@ app.post('/api/generate', async (req, res) => {
             musicSearch: musicSearch || 'ambient peaceful background music', 
             photoSource: photoSource || 'pexels',
             soundSource: soundSource || 'freesound',
-            database: database || 'other' // Use 'other' for script mode (CC0 photos)
+            database: database || 'other', // Use 'other' for script mode (CC0 photos)
+            processingMode: processingMode || 'quick'
         });
     } else {
         generateVideoAsync(jobId, youtubeUrl, { 
             startTime, 
             endTime, 
             thumbnailMemeUrl, 
-            database: database || 'apu' 
+            database: database || 'apu',
+            processingMode: processingMode || 'quick',
+            preselectedKeywords
         });
     }
 
@@ -183,6 +187,79 @@ app.get('/api/download/:filename', (req, res) => {
             Logger.success(`✅ Download completed: ${filename}`);
         }
     });
+});
+
+// Continue with reviewed keywords (detailed mode)
+app.post('/api/continue/:jobId', (req, res) => {
+    const { jobId } = req.params;
+    const { keywords } = req.body;
+    
+    const job = activeJobs.get(jobId);
+    if (!job) {
+        return res.status(404).json({ error: 'Job not found' });
+    }
+    
+    if (!keywords || !Array.isArray(keywords)) {
+        return res.status(400).json({ error: 'Keywords array is required' });
+    }
+    
+    // Store the reviewed keywords in the job
+    job.reviewedKeywords = keywords;
+    job.status = 'keywords_reviewed';
+    job.message = 'Keywords reviewed, continuing generation...';
+    job.progress = 50;
+    
+    Logger.info(`🔍 Job ${jobId}: Keywords reviewed by user, continuing generation`);
+    
+    // Continue generation in background
+    continueDetailedGeneration(jobId, keywords);
+    
+    res.json({ message: 'Keywords received, continuing generation' });
+});
+
+// Regenerate keywords (detailed mode)
+app.post('/api/regenerate-keywords/:jobId', async (req, res) => {
+    const { jobId } = req.params;
+    
+    const job = activeJobs.get(jobId);
+    if (!job) {
+        return res.status(404).json({ error: 'Job not found' });
+    }
+    
+    if (!job.transcript) {
+        return res.status(400).json({ error: 'No transcript available for keyword regeneration' });
+    }
+    
+    try {
+        job.status = 'regenerating_keywords';
+        job.message = 'Regenerating keywords...';
+        
+        // Re-extract keywords from the stored transcript
+        const KeywordExtractor = require('./keywordExtractor');
+        const keywordExtractor = new KeywordExtractor();
+        
+        const keywordData = await keywordExtractor.extractKeywords(job.transcript);
+        const keywords = keywordData.map(item => ({
+            timestamp: `${Math.floor(item.start / 60)}:${String(Math.floor(item.start % 60)).padStart(2, '0')}`,
+            keyword: item.keyword,
+            lyrics: item.text,
+            text: item.text  // Ensure both fields are available
+        }));
+        
+        // Update job with new keywords
+        job.keywords = keywords;
+        job.status = 'keywords_extracted';
+        job.message = 'Keywords regenerated, ready for review';
+        
+        Logger.info(`🔄 Job ${jobId}: Keywords regenerated`);
+        
+        res.json({ keywords });
+    } catch (error) {
+        Logger.error(`❌ Job ${jobId}: Keyword regeneration failed:`, error);
+        job.status = 'error';
+        job.message = 'Keyword regeneration failed: ' + error.message;
+        res.status(500).json({ error: 'Keyword regeneration failed: ' + error.message });
+    }
 });
 
 // Cleanup endpoint
@@ -368,10 +445,10 @@ async function generateVideoAsync(jobId, youtubeUrl, options) {
         };
 
         // Race between generation and timeout with additional error wrapping
-        const outputPath = await Promise.race([
+        const result = await Promise.race([
             (async () => {
                 try {
-                    return await generator.generateVideo(youtubeUrl, options);
+                    return await generator.generateVideo(youtubeUrl, { ...options, jobId });
                 } catch (err) {
                     Logger.error('Generator error:', err);
                     throw err;
@@ -379,6 +456,30 @@ async function generateVideoAsync(jobId, youtubeUrl, options) {
             })(),
             timeoutPromise
         ]);
+
+        // Check if result is pause data for detailed mode
+        if (result && result.isPause) {
+            Logger.info(`🔍 Job ${jobId}: Pausing for keyword review in detailed mode`);
+            
+            // Store the pause data in the job
+            const job = activeJobs.get(jobId);
+            if (job) {
+                job.transcript = result.transcript;
+                job.keywordData = result.keywordData;
+                job.audioPath = result.audioPath;
+                job.thumbnailMemeUrl = result.thumbnailMemeUrl;
+                job.keywords = result.keywords;
+                job.database = result.database;
+                job.status = 'keywords_extracted';
+                job.message = 'Keywords extracted, waiting for user review';
+                job.progress = 40;
+                
+                Logger.info(`🔍 Job ${jobId}: Stored pause data, waiting for user keyword review`);
+            }
+            return; // Don't proceed further, wait for user input
+        }
+
+        const outputPath = result;
         
         // Restore original logger
         Logger.info = originalInfo;
@@ -438,4 +539,89 @@ app.listen(PORT, () => {
     console.log('='.repeat(60) + '\n');
 });
 
-module.exports = app; 
+// Continue detailed generation after keyword review
+async function continueDetailedGeneration(jobId, reviewedKeywords) {
+    const updateJob = (status, progress, message, outputPath = null) => {
+        try {
+            const currentJob = activeJobs.get(jobId);
+            activeJobs.set(jobId, {
+                ...currentJob,
+                status,
+                progress,
+                message,
+                outputPath,
+                endTime: status === 'completed' || status === 'error' ? new Date() : null
+            });
+        } catch (err) {
+            Logger.error('Failed to update job status:', err);
+        }
+    };
+
+    try {
+        const job = activeJobs.get(jobId);
+        if (!job) {
+            Logger.error(`Job ${jobId} not found for continuation`);
+            return;
+        }
+
+        // Reconstruct keyword data from reviewed keywords
+        const keywordData = reviewedKeywords.map((reviewedKeyword, index) => {
+            const originalKeyword = job.keywordData[index];
+            return {
+                ...originalKeyword,
+                keyword: reviewedKeyword.keyword
+            };
+        });
+
+        // Create custom logger to update progress
+        const originalInfo = Logger.info;
+        
+        Logger.info = (message, data) => {
+            try {
+                originalInfo(message, data);
+                
+                // Update progress based on message content
+                if (message.includes('Step 4/6')) updateJob('running', 60, 'Searching for memes...');
+                else if (message.includes('Meme search completed')) updateJob('running', 70, 'Memes collected! Creating slides...');
+                else if (message.includes('Step 5/6')) updateJob('running', 80, 'Rendering slides...');
+                else if (message.includes('Step 6/6')) updateJob('running', 90, 'Creating final video...');
+                else if (message.includes('Meme video generation completed')) updateJob('running', 95, 'Video complete! Preparing download...');
+            } catch (err) {
+                originalInfo(message, data);
+            }
+        };
+
+        // Continue generation from where we left off
+        const outputPath = await generator.continueDetailedGeneration(
+            keywordData,
+            job.audioPath,
+            job.thumbnailMemeUrl,
+            { database: job.database || 'apu' }
+        );
+
+        // Restore original logger
+        Logger.info = originalInfo;
+
+        const filename = path.basename(outputPath);
+        updateJob('completed', 100, 'Video generated successfully!', filename);
+
+    } catch (error) {
+        // Restore original logger in case of error
+        Logger.info = Logger.info.originalInfo || Logger.info;
+        
+        Logger.error(`Detailed generation continuation failed for job ${jobId}:`, error.message);
+        
+        // Determine error type for better user feedback
+        let userMessage = error.message;
+        if (error.message.includes('timeout')) {
+            userMessage = 'Generation timed out. Try a shorter video or time range.';
+        } else if (error.message.includes('network') || error.message.includes('ENOTFOUND')) {
+            userMessage = 'Network error. Please check your internet connection.';
+        }
+        
+        updateJob('error', 0, userMessage, null);
+    }
+}
+
+module.exports = app;
+module.exports.getActiveJobs = () => activeJobs; 

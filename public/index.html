@@ -393,6 +393,24 @@
                 </div>
             </div>
 
+            <div class="form-group" id="processingModeGroup">
+                <label>Processing Mode</label>
+                <div class="radio-group">
+                    <label class="radio-option">
+                        <input type="radio" name="processingMode" value="quick" checked>
+                        <span class="radio-label">⚡ Quick</span>
+                    </label>
+                    <label class="radio-option">
+                        <input type="radio" name="processingMode" value="detailed">
+                        <span class="radio-label">🔍 Detailed</span>
+                    </label>
+                </div>
+                <div class="mode-description" style="margin-top: 8px; font-size: 0.85rem; color: #718096;">
+                    <span id="quickDesc">Automatically matches memes to lyrics</span>
+                    <span id="detailedDesc" style="display: none;">Review and edit action words before meme matching</span>
+                </div>
+            </div>
+
             <div class="form-group" id="timeRangeGroup">
                 <label>Time Range (Optional)</label>
                 <div class="time-inputs">
@@ -431,11 +449,37 @@
             <h3 style="color: #22543d; margin-bottom: 12px;">🎉 Video Generated Successfully!</h3>
             <p style="color: #2f855a; margin-bottom: 16px;">Your meme video is ready for download.</p>
             <a href="#" class="button download-button" id="downloadBtn">📥 Download Video</a>
+            <button type="button" class="button" id="generateAgainBtn" style="display: none; margin-top: 12px; background: linear-gradient(135deg, #667eea, #764ba2);">
+                🔄 Generate Again with Same Keywords
+            </button>
         </div>
 
         <div class="error-container" id="errorContainer">
             <h3 style="color: #c53030; margin-bottom: 12px;">❌ Generation Failed</h3>
             <p style="color: #e53e3e;" id="errorMessage">An error occurred during video generation.</p>
+        </div>
+
+        <!-- Keyword Review Interface for Detailed Mode -->
+        <div class="keyword-review-container" id="keywordReviewContainer" style="display: none;">
+            <div style="background: #f7fafc; border: 2px solid #e2e8f0; border-radius: 12px; padding: 24px; margin-top: 20px;">
+                <h3 style="color: #2d3748; margin-bottom: 16px; text-align: center;">🔍 Review & Edit Action Words</h3>
+                <p style="color: #4a5568; margin-bottom: 20px; text-align: center; font-size: 0.95rem;">
+                    Review the extracted action words that will be used to search for memes. You can edit them to get better meme matches.
+                </p>
+                
+                <div id="keywordList" style="display: grid; gap: 12px;">
+                    <!-- Keywords will be populated here -->
+                </div>
+                
+                <div style="display: flex; gap: 12px; margin-top: 20px;">
+                    <button type="button" class="button" id="continueWithKeywords" style="flex: 1; background: linear-gradient(135deg, #48bb78, #38a169);">
+                        ✅ Continue with These Keywords
+                    </button>
+                    <button type="button" class="button" id="regenerateKeywords" style="flex: 1; background: linear-gradient(135deg, #ed8936, #dd6b20);">
+                        🔄 Regenerate Keywords
+                    </button>
+                </div>
+            </div>
         </div>
 
         <button class="button cleanup-button" id="cleanupBtn">
@@ -458,7 +502,12 @@
         const progressText = document.getElementById('progressText');
         const resultContainer = document.getElementById('resultContainer');
         const errorContainer = document.getElementById('errorContainer');
+        const keywordReviewContainer = document.getElementById('keywordReviewContainer');
+        const keywordList = document.getElementById('keywordList');
+        const continueWithKeywords = document.getElementById('continueWithKeywords');
+        const regenerateKeywords = document.getElementById('regenerateKeywords');
         const downloadBtn = document.getElementById('downloadBtn');
+        const generateAgainBtn = document.getElementById('generateAgainBtn');
         const cleanupBtn = document.getElementById('cleanupBtn');
         const errorMessage = document.getElementById('errorMessage');
 
@@ -475,6 +524,8 @@
 
         let currentJobId = null;
         let eventSource = null;
+        let currentKeywords = null;
+        let lastGenerationData = null;
 
         // Load available voices from API
         async function loadVoices() {
@@ -505,6 +556,24 @@
         document.addEventListener('DOMContentLoaded', function() {
             // Load voices when page loads
             loadVoices();
+            
+            // Handle processing mode description toggle
+            const processingModeRadios = document.querySelectorAll('input[name="processingMode"]');
+            const quickDesc = document.getElementById('quickDesc');
+            const detailedDesc = document.getElementById('detailedDesc');
+            
+            processingModeRadios.forEach(radio => {
+                radio.addEventListener('change', function() {
+                    if (this.value === 'detailed') {
+                        quickDesc.style.display = 'none';
+                        detailedDesc.style.display = 'inline';
+                    } else {
+                        quickDesc.style.display = 'inline';
+                        detailedDesc.style.display = 'none';
+                    }
+                });
+            });
+            
             const databaseRadios = document.querySelectorAll('input[name="database"]');
             
             databaseRadios.forEach(radio => {
@@ -554,6 +623,7 @@
             
             let data = {
                 database: database,
+                processingMode: formData.get('processingMode') || 'quick',
                 startTime: formData.get('startTime') || null,
                 endTime: formData.get('endTime') || null
             };
@@ -645,6 +715,11 @@
                     showError(job.message);
                     eventSource.close();
                     resetForm();
+                } else if (job.status === 'keywords_extracted') {
+                    // Show keyword review interface for detailed mode
+                    currentKeywords = job.keywords;
+                    showKeywordReview(job.keywords);
+                    eventSource.close();
                 }
             };
 
@@ -685,6 +760,14 @@
             hideAllContainers();
             resultContainer.style.display = 'block';
             downloadBtn.href = `/api/download/${filename}`;
+            
+            // Show "Generate Again" button if this was a detailed mode generation
+            const selectedProcessingMode = document.querySelector('input[name="processingMode"]:checked')?.value;
+            if (selectedProcessingMode === 'detailed' && lastGenerationData) {
+                generateAgainBtn.style.display = 'block';
+            } else {
+                generateAgainBtn.style.display = 'none';
+            }
         }
 
         function showError(message) {
@@ -697,6 +780,56 @@
             progressContainer.style.display = 'none';
             resultContainer.style.display = 'none';
             errorContainer.style.display = 'none';
+            keywordReviewContainer.style.display = 'none';
+        }
+
+        function showKeywordReview(keywords) {
+            hideAllContainers();
+            keywordReviewContainer.style.display = 'block';
+            
+            // Clear previous keywords
+            keywordList.innerHTML = '';
+            
+            // Create input for each keyword
+            keywords.forEach((keywordData, index) => {
+                const keywordItem = document.createElement('div');
+                keywordItem.style.cssText = 'display: grid; grid-template-columns: 80px 1fr 2fr; gap: 12px; align-items: center; padding: 16px; background: white; border: 1px solid #e2e8f0; border-radius: 8px;';
+                
+                const timeLabel = document.createElement('span');
+                timeLabel.textContent = keywordData.timestamp;
+                timeLabel.style.cssText = 'font-family: monospace; font-size: 0.9rem; color: #4a5568; text-align: center; background: #f7fafc; padding: 6px 8px; border-radius: 4px; min-width: 60px;';
+                
+                const keywordInput = document.createElement('input');
+                keywordInput.type = 'text';
+                keywordInput.value = keywordData.keyword;
+                keywordInput.style.cssText = 'padding: 8px 12px; border: 1px solid #e2e8f0; border-radius: 6px; font-size: 0.95rem; transition: all 0.3s ease; min-width: 120px;';
+                keywordInput.addEventListener('focus', () => {
+                    keywordInput.style.borderColor = '#667eea';
+                    keywordInput.style.boxShadow = '0 0 0 2px rgba(102, 126, 234, 0.1)';
+                });
+                keywordInput.addEventListener('blur', () => {
+                    keywordInput.style.borderColor = '#e2e8f0';
+                    keywordInput.style.boxShadow = 'none';
+                });
+                
+                const lyricsText = document.createElement('div');
+                const lyricsContent = keywordData.lyrics || keywordData.text || 'No lyrics available';
+                lyricsText.textContent = `"${lyricsContent}"`;
+                lyricsText.style.cssText = 'font-style: italic; color: #718096; font-size: 0.9rem; padding: 8px 12px; background: #f7fafc; border-radius: 6px; border-left: 3px solid #cbd5e0;';
+                
+                keywordItem.appendChild(timeLabel);
+                keywordItem.appendChild(keywordInput);
+                keywordItem.appendChild(lyricsText);
+                keywordList.appendChild(keywordItem);
+            });
+        }
+
+        function getUpdatedKeywords() {
+            const inputs = keywordList.querySelectorAll('input');
+            return Array.from(inputs).map((input, index) => ({
+                timestamp: currentKeywords[index].timestamp,
+                keyword: input.value.trim()
+            })).filter(item => item.keyword.length > 0);
         }
 
         function resetForm() {
@@ -709,6 +842,139 @@
                 generateBtn.textContent = '🚀 Generate Meme Video';
             }
         }
+
+        // Handle keyword review actions
+        continueWithKeywords.addEventListener('click', async () => {
+            const updatedKeywords = getUpdatedKeywords();
+            
+            if (updatedKeywords.length === 0) {
+                alert('Please provide at least one keyword');
+                return;
+            }
+            
+            continueWithKeywords.disabled = true;
+            regenerateKeywords.disabled = true;
+            continueWithKeywords.textContent = '🔄 Continuing...';
+            
+            try {
+                const response = await fetch(`/api/continue/${currentJobId}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ keywords: updatedKeywords })
+                });
+                
+                const result = await response.json();
+                
+                if (!response.ok) {
+                    throw new Error(result.error);
+                }
+                
+                // Hide keyword review and show progress
+                hideAllContainers();
+                progressContainer.style.display = 'block';
+                
+                // Save generation data for "Generate Again" feature
+                lastGenerationData = {
+                    youtubeUrl: document.getElementById('youtubeUrl').value,
+                    database: document.querySelector('input[name="database"]:checked')?.value,
+                    startTime: document.getElementById('startTime').value,
+                    endTime: document.getElementById('endTime').value,
+                    keywords: updatedKeywords
+                };
+                
+                // Resume progress stream
+                startProgressStream(currentJobId);
+                
+            } catch (error) {
+                showError(error.message);
+                resetForm();
+            } finally {
+                continueWithKeywords.disabled = false;
+                regenerateKeywords.disabled = false;
+                continueWithKeywords.textContent = '✅ Continue with These Keywords';
+            }
+        });
+
+        regenerateKeywords.addEventListener('click', async () => {
+            continueWithKeywords.disabled = true;
+            regenerateKeywords.disabled = true;
+            regenerateKeywords.textContent = '🔄 Regenerating...';
+            
+            try {
+                const response = await fetch(`/api/regenerate-keywords/${currentJobId}`, {
+                    method: 'POST'
+                });
+                
+                const result = await response.json();
+                
+                if (!response.ok) {
+                    throw new Error(result.error);
+                }
+                
+                // Update the keyword review with new keywords
+                currentKeywords = result.keywords;
+                showKeywordReview(result.keywords);
+                
+            } catch (error) {
+                showError(error.message);
+                resetForm();
+            } finally {
+                continueWithKeywords.disabled = false;
+                regenerateKeywords.disabled = false;
+                regenerateKeywords.textContent = '🔄 Regenerate Keywords';
+            }
+        });
+
+        // Handle "Generate Again" button
+        generateAgainBtn.addEventListener('click', async () => {
+            if (!lastGenerationData) {
+                alert('No previous generation data found');
+                return;
+            }
+            
+            generateAgainBtn.disabled = true;
+            generateAgainBtn.textContent = '🔄 Generating...';
+            
+            try {
+                // Reset UI
+                hideAllContainers();
+                generateBtn.disabled = true;
+                generateBtn.textContent = '🔄 Starting...';
+                progressContainer.style.display = 'block';
+                
+                // Use the saved generation data to generate again
+                const data = {
+                    youtubeUrl: lastGenerationData.youtubeUrl,
+                    database: lastGenerationData.database,
+                    processingMode: 'quick', // Use quick mode with pre-selected keywords
+                    startTime: lastGenerationData.startTime,
+                    endTime: lastGenerationData.endTime,
+                    preselectedKeywords: lastGenerationData.keywords // Pass the keywords directly
+                };
+                
+                const response = await fetch('/api/generate', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(data)
+                });
+                
+                const result = await response.json();
+                
+                if (!response.ok) {
+                    throw new Error(result.error);
+                }
+                
+                currentJobId = result.jobId;
+                startProgressStream(result.jobId);
+                
+            } catch (error) {
+                showError(error.message);
+                resetForm();
+            } finally {
+                generateAgainBtn.disabled = false;
+                generateAgainBtn.textContent = '🔄 Generate Again with Same Keywords';
+            }
+        });
 
         cleanupBtn.addEventListener('click', async () => {
             cleanupBtn.disabled = true;

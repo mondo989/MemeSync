@@ -31,6 +31,30 @@ class MemeVideoGenerator {
      * @returns {Promise<string>} - Path to generated video
      */
     async generateVideo(youtubeUrl, options = {}) {
+        // Check if we have preselected keywords (Generate Again feature)
+        if (options.preselectedKeywords && options.preselectedKeywords.length > 0) {
+            Logger.info('🔄 Using preselected keywords from previous generation');
+            return this.generateVideoWithPreselectedKeywords(youtubeUrl, options);
+        }
+        
+        // Check if this is detailed mode
+        Logger.info(`🔍 Processing mode: ${options.processingMode || 'quick'}`);
+        if (options.processingMode === 'detailed') {
+            Logger.info('🔍 Switching to detailed mode with keyword review');
+            return this.generateVideoDetailed(youtubeUrl, options);
+        }
+        
+        Logger.info('⚡ Using quick mode (no keyword review)');
+        return this.generateVideoQuick(youtubeUrl, options);
+    }
+
+    /**
+     * Generate video in quick mode (original flow)
+     * @param {string} youtubeUrl - YouTube video URL
+     * @param {Object} options - Generation options
+     * @returns {Promise<string>} - Path to generated video
+     */
+    async generateVideoQuick(youtubeUrl, options = {}) {
         const {
             startTime = null,
             endTime = null,
@@ -142,6 +166,303 @@ class MemeVideoGenerator {
 
         } catch (error) {
             Logger.error('❌ Video generation failed:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Generate video with preselected keywords (Generate Again feature)
+     * @param {string} youtubeUrl - YouTube video URL
+     * @param {Object} options - Generation options
+     * @returns {Promise<string>} - Path to generated video
+     */
+    async generateVideoWithPreselectedKeywords(youtubeUrl, options = {}) {
+        const {
+            startTime = null,
+            endTime = null,
+            thumbnailMemeUrl = null,
+            skipMemeGeneration = false,
+            preselectedKeywords = []
+        } = options;
+
+        Logger.info('🔄 Starting Video Generation with Preselected Keywords');
+        Logger.info(`YouTube URL: ${youtubeUrl}`);
+        Logger.info(`Using ${preselectedKeywords.length} preselected keywords`);
+        
+        if (startTime && endTime) {
+            Logger.info(`Time range: ${startTime} to ${endTime}`);
+        }
+
+        try {
+            // Step 1: Ensure we have memes database
+            if (!skipMemeGeneration) {
+                await this.ensureMemesDatabase();
+            }
+
+            // Step 2: Download and process audio
+            Logger.info('📥 Step 1/6: Downloading and processing audio...');
+            const audioPath = await this.videoRenderer.downloadAudio(youtubeUrl, startTime, endTime);
+
+            // Step 3: Get transcript with timestamps (needed for timing)
+            Logger.info('🎤 Step 2/6: Generating transcript...');
+            const transcript = await this.transcriptionService.getTranscript(youtubeUrl, startTime, endTime);
+            
+            if (transcript.length === 0) {
+                throw new Error('No transcript generated - cannot proceed');
+            }
+
+            // Step 3.5: Convert preselected keywords back to keywordData format
+            Logger.info('🔄 Step 3/6: Using preselected keywords...');
+            const keywordData = preselectedKeywords.map((keywordItem, index) => {
+                const transcriptSegment = transcript[index];
+                if (!transcriptSegment) {
+                    throw new Error(`Mismatch: preselected keyword ${index} has no corresponding transcript segment`);
+                }
+                return {
+                    start: transcriptSegment.start,
+                    end: transcriptSegment.end,
+                    text: transcriptSegment.text,
+                    keyword: keywordItem.keyword
+                };
+            });
+
+            Logger.info('Preselected keywords applied:');
+            keywordData.forEach((item, index) => {
+                Logger.info(`  ${index + 1}. "${item.keyword}" from: "${item.text}"`);
+            });
+
+            // Step 4: Search for memes dynamically using Puppeteer
+            Logger.info('🎭 Step 4/6: Searching for memes...');
+            const keywords = keywordData.map(item => item.keyword);
+            const memeResults = await this.puppeteerScraper.searchMemesForKeywords(keywords, options.database || 'apu');
+
+            Logger.success(`🎭 Meme search completed! Found memes for ${memeResults.length} keywords`);
+            
+            // Validate array lengths match
+            if (keywordData.length !== memeResults.length) {
+                throw new Error(`Mismatch: ${keywordData.length} keywords but ${memeResults.length} meme results`);
+            }
+            
+            // Combine keyword data with meme results using index-based mapping
+            const matchedMemes = keywordData.map((item, index) => {
+                // Use index-based mapping instead of keyword matching to ensure unique memes
+                const memeResult = memeResults[index];
+                if (!memeResult) {
+                    throw new Error(`No meme found at index ${index} for keyword: ${item.keyword}`);
+                }
+                return {
+                    ...item,
+                    meme: {
+                        url: memeResult.memeUrl,
+                        keywords: [item.keyword]
+                    }
+                };
+            });
+
+            // ✅ CHECKPOINT PASSED: Meme collection successful! Now creating video...
+            Logger.success(`🎭 Meme search completed! Found memes for ${matchedMemes.length} keywords`);
+            Logger.info('📋 Collected memes summary:');
+            matchedMemes.forEach((item, index) => {
+                Logger.debug(`${index + 1}. "${item.keyword}" → ${item.meme.url.substring(0, 60)}...`);
+            });
+
+            // Step 4.5: Split long segments into multiple memes
+            Logger.info('⏱️  Checking for long segments that need multiple memes...');
+            const expandedMemes = await this.expandLongSegments(matchedMemes, options.database || 'apu');
+            
+            if (expandedMemes.length > matchedMemes.length) {
+                Logger.info(`📈 Expanded ${matchedMemes.length} segments to ${expandedMemes.length} meme slots for better coverage`);
+            }
+
+            // Step 5: Render slides
+            Logger.info('🖼️  Step 5/6: Rendering slides...');
+            const slides = await this.slideRenderer.renderSlides(expandedMemes, thumbnailMemeUrl, options.database || 'apu');
+
+            // Step 6: Create final video
+            Logger.info('🎥 Step 6/6: Creating final video...');
+            const outputPath = await this.videoRenderer.createVideo(slides, audioPath, options.database || 'apu');
+
+            // Get video info
+            const videoInfo = await this.videoRenderer.getVideoInfo(outputPath);
+            
+            Logger.success('🎉 Meme video generation completed!');
+            Logger.success(`📁 Output: ${outputPath}`);
+            Logger.success(`⏱️  Duration: ${Math.round(videoInfo.duration)}s`);
+            Logger.success(`📊 Size: ${Math.round(videoInfo.size / 1024 / 1024)}MB`);
+
+            return outputPath;
+
+        } catch (error) {
+            Logger.error('❌ Video generation with preselected keywords failed:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Generate video in detailed mode (with keyword review pause)
+     * @param {string} youtubeUrl - YouTube video URL
+     * @param {Object} options - Generation options
+     * @returns {Promise<string>} - Path to generated video or throws PauseForKeywordReview
+     */
+    async generateVideoDetailed(youtubeUrl, options = {}) {
+        const {
+            startTime = null,
+            endTime = null,
+            thumbnailMemeUrl = null,
+            skipMemeGeneration = false,
+            jobId = null
+        } = options;
+
+        Logger.info('🎬 Starting Detailed Meme Video Generation');
+        Logger.info(`YouTube URL: ${youtubeUrl}`);
+        
+        if (startTime && endTime) {
+            Logger.info(`Time range: ${startTime} to ${endTime}`);
+        }
+
+        try {
+            // Step 1: Ensure we have memes database
+            if (!skipMemeGeneration) {
+                await this.ensureMemesDatabase();
+            }
+
+            // Step 2: Download and process audio
+            Logger.info('📥 Step 1/6: Downloading and processing audio...');
+            const audioPath = await this.videoRenderer.downloadAudio(youtubeUrl, startTime, endTime);
+
+            // Step 3: Get transcript with timestamps
+            Logger.info('🎤 Step 2/6: Generating transcript...');
+            const transcript = await this.transcriptionService.getTranscript(youtubeUrl, startTime, endTime);
+            
+            if (transcript.length === 0) {
+                throw new Error('No transcript generated - cannot proceed');
+            }
+
+            // Step 4: Extract keywords from transcript
+            Logger.info('🔍 Step 3/6: Extracting keywords...');
+            const keywordData = await this.keywordExtractor.extractKeywords(transcript);
+
+            // Log the extracted lyrics for review
+            Logger.success('📝 Lyrics extraction completed!');
+            Logger.info('Extracted lyrics segments:');
+            transcript.forEach((segment, index) => {
+                Logger.info(`  ${index + 1}. [${segment.start.toFixed(1)}s-${segment.end.toFixed(1)}s] "${segment.text}"`);
+            });
+
+            Logger.info('\nExtracted keywords:');
+            keywordData.forEach((item, index) => {
+                Logger.info(`  ${index + 1}. "${item.keyword}" from: "${item.text}"`);
+            });
+
+            // PAUSE FOR KEYWORD REVIEW - Return data for server to handle
+            Logger.info(`🔍 DETAILED MODE: Preparing keyword review data. JobId: ${jobId}`);
+            
+            // Format keywords for frontend display
+            const keywords = keywordData.map(item => ({
+                timestamp: `${Math.floor(item.start / 60)}:${String(Math.floor(item.start % 60)).padStart(2, '0')}`,
+                keyword: item.keyword,
+                lyrics: item.text,
+                text: item.text  // Ensure both fields are available
+            }));
+            
+            // Return special object to signal keyword review pause
+            const pauseData = {
+                isPause: true,
+                transcript,
+                keywordData,
+                audioPath,
+                thumbnailMemeUrl,
+                keywords,
+                database: options.database
+            };
+            
+            Logger.info('🔍 Keywords extracted, returning pause data for user review...');
+            
+            // Return the pause data instead of throwing an error
+            return pauseData;
+
+            // Continue with the rest of the generation (this will be called after user reviews keywords)
+            return this.continueDetailedGeneration(keywordData, audioPath, thumbnailMemeUrl, options);
+
+        } catch (error) {
+            Logger.error('❌ Video generation failed:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Continue detailed generation after keyword review
+     * @param {Array} keywordData - Reviewed keyword data
+     * @param {string} audioPath - Path to audio file
+     * @param {string} thumbnailMemeUrl - Optional thumbnail meme URL
+     * @param {Object} options - Generation options
+     * @returns {Promise<string>} - Path to generated video
+     */
+    async continueDetailedGeneration(keywordData, audioPath, thumbnailMemeUrl, options = {}) {
+        try {
+            // Step 5: Search for memes dynamically using Puppeteer
+            Logger.info('🎭 Step 4/6: Searching for memes...');
+            const keywords = keywordData.map(item => item.keyword);
+            const memeResults = await this.puppeteerScraper.searchMemesForKeywords(keywords, options.database || 'apu');
+
+            Logger.success(`🎭 Meme search completed! Found memes for ${memeResults.length} keywords`);
+            
+            // Validate array lengths match
+            if (keywordData.length !== memeResults.length) {
+                throw new Error(`Mismatch: ${keywordData.length} keywords but ${memeResults.length} meme results`);
+            }
+            
+            // Combine keyword data with meme results using index-based mapping
+            const matchedMemes = keywordData.map((item, index) => {
+                // Use index-based mapping instead of keyword matching to ensure unique memes
+                const memeResult = memeResults[index];
+                if (!memeResult) {
+                    throw new Error(`No meme found at index ${index} for keyword: ${item.keyword}`);
+                }
+                return {
+                    ...item,
+                    meme: {
+                        url: memeResult.memeUrl,
+                        keywords: [item.keyword]
+                    }
+                };
+            });
+
+            // ✅ CHECKPOINT PASSED: Meme collection successful! Now creating video...
+            Logger.success(`🎭 Meme search completed! Found memes for ${matchedMemes.length} keywords`);
+            Logger.info('📋 Collected memes summary:');
+            matchedMemes.forEach((item, index) => {
+                Logger.debug(`${index + 1}. "${item.keyword}" → ${item.meme.url.substring(0, 60)}...`);
+            });
+
+            // Step 4.5: Split long segments into multiple memes
+            Logger.info('⏱️  Checking for long segments that need multiple memes...');
+            const expandedMemes = await this.expandLongSegments(matchedMemes, options.database || 'apu');
+            
+            if (expandedMemes.length > matchedMemes.length) {
+                Logger.info(`📈 Expanded ${matchedMemes.length} segments to ${expandedMemes.length} meme slots for better coverage`);
+            }
+
+            // Step 5: Render slides
+            Logger.info('🖼️  Step 5/6: Rendering slides...');
+            const slides = await this.slideRenderer.renderSlides(expandedMemes, thumbnailMemeUrl, options.database || 'apu');
+
+            // Step 6: Create final video
+            Logger.info('🎥 Step 6/6: Creating final video...');
+            const outputPath = await this.videoRenderer.createVideo(slides, audioPath, options.database || 'apu');
+
+            // Get video info
+            const videoInfo = await this.videoRenderer.getVideoInfo(outputPath);
+            
+            Logger.success('🎉 Meme video generation completed!');
+            Logger.success(`📁 Output: ${outputPath}`);
+            Logger.success(`⏱️  Duration: ${Math.round(videoInfo.duration)}s`);
+            Logger.success(`📊 Size: ${Math.round(videoInfo.size / 1024 / 1024)}MB`);
+
+            return outputPath;
+
+        } catch (error) {
+            Logger.error('❌ Video generation continuation failed:', error);
             throw error;
         }
     }
