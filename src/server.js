@@ -112,8 +112,9 @@ app.post('/api/generate', async (req, res) => {
             musicSearch: musicSearch || 'ambient peaceful background music', 
             photoSource: photoSource || 'pexels',
             soundSource: soundSource || 'freesound',
-            database: database || 'other', // Use 'other' for script mode (CC0 photos)
-            processingMode: processingMode || 'quick'
+            database: database || 'apu', // Use whatever database the user selected
+            processingMode: processingMode || 'quick',
+            jobId: jobId  // Pass jobId for detailed mode
         });
     } else {
         generateVideoAsync(jobId, youtubeUrl, { 
@@ -189,8 +190,8 @@ app.get('/api/download/:filename', (req, res) => {
     });
 });
 
-// Continue with reviewed keywords (detailed mode)
-app.post('/api/continue/:jobId', (req, res) => {
+// Preview images for keywords (detailed mode)
+app.post('/api/preview-images/:jobId', async (req, res) => {
     const { jobId } = req.params;
     const { keywords } = req.body;
     
@@ -203,16 +204,263 @@ app.post('/api/continue/:jobId', (req, res) => {
         return res.status(400).json({ error: 'Keywords array is required' });
     }
     
-    // Store the reviewed keywords in the job
-    job.reviewedKeywords = keywords;
-    job.status = 'keywords_reviewed';
-    job.message = 'Keywords reviewed, continuing generation...';
-    job.progress = 50;
+    try {
+        Logger.info(`🖼️ Job ${jobId}: Fetching preview images for ${keywords.length} keywords`);
+        
+        // Extract just the keyword strings for puppeteer
+        const keywordStrings = keywords.map(k => k.keyword);
+        
+        // Use puppeteer to fetch images for keywords
+        const PuppeteerScraper = require('./puppeteerScraper');
+        const puppeteerScraper = new PuppeteerScraper();
+        
+        const database = job.database || 'apu';
+        let imageResults;
+        
+        if (database === 'other') {
+            // For script mode, get the photoSource from pauseData
+            const photoSource = job.pauseData && job.pauseData.scriptOptions 
+                ? job.pauseData.scriptOptions.photoSource 
+                : 'pexels';
+            
+            Logger.info(`🖼️ Job ${jobId}: Using photo source: ${photoSource}`);
+            imageResults = await puppeteerScraper.searchPhotosForKeywords(keywordStrings, photoSource);
+        } else {
+            imageResults = await puppeteerScraper.searchMemesForKeywords(keywordStrings, database);
+        }
+        
+        // Combine keywords with their images
+        const images = keywords.map((keywordData, index) => {
+            const imageResult = imageResults[index];
+            return {
+                ...keywordData,
+                imageUrl: imageResult ? imageResult.memeUrl : null
+            };
+        });
+        
+        // Store the images in the job for later use
+        job.previewImages = images;
+        
+        Logger.success(`🖼️ Job ${jobId}: Fetched ${images.length} preview images`);
+        
+        res.json({ images });
+        
+    } catch (error) {
+        Logger.error(`❌ Job ${jobId}: Preview image fetch failed:`, error);
+        res.status(500).json({ error: 'Failed to fetch preview images: ' + error.message });
+    }
+});
+
+// Refresh single image (detailed mode)
+app.post('/api/refresh-image/:jobId', async (req, res) => {
+    const { jobId } = req.params;
+    const { keyword, index, database } = req.body;
     
-    Logger.info(`🔍 Job ${jobId}: Keywords reviewed by user, continuing generation`);
+    const job = activeJobs.get(jobId);
+    if (!job) {
+        return res.status(404).json({ error: 'Job not found' });
+    }
+    
+    if (!keyword || index === undefined) {
+        return res.status(400).json({ error: 'Keyword and index are required' });
+    }
+    
+    try {
+        Logger.info(`🔄 Job ${jobId}: Refreshing image for keyword "${keyword}" at index ${index}`);
+        
+        // Use puppeteer to fetch a new image for this specific keyword
+        const PuppeteerScraper = require('./puppeteerScraper');
+        const puppeteerScraper = new PuppeteerScraper();
+        
+        let imageUrl;
+        
+        if (database === 'other') {
+            // For script mode, get the photoSource from pauseData
+            const photoSource = job.pauseData && job.pauseData.scriptOptions 
+                ? job.pauseData.scriptOptions.photoSource 
+                : 'pexels';
+            
+            Logger.info(`🔄 Job ${jobId}: Refreshing photo from source: ${photoSource}`);
+            // For photos, get a new photo by using random selection
+            const photoResult = await puppeteerScraper.searchSingleKeywordPhoto(keyword, [], photoSource);
+            imageUrl = photoResult;
+        } else {
+            // For memes, use the searchMemesForKeywords method with a single keyword
+            const memeResults = await puppeteerScraper.searchMemesForKeywords([keyword], database);
+            if (memeResults && memeResults.length > 0 && memeResults[0].memeUrl) {
+                imageUrl = memeResults[0].memeUrl;
+            } else {
+                throw new Error(`No meme found for keyword: ${keyword}`);
+            }
+        }
+        
+        // Update the stored preview image if it exists
+        if (job.previewImages && job.previewImages[index]) {
+            job.previewImages[index].imageUrl = imageUrl;
+        }
+        
+        Logger.success(`🔄 Job ${jobId}: Refreshed image for "${keyword}"`);
+        
+        res.json({ imageUrl });
+        
+    } catch (error) {
+        Logger.error(`❌ Job ${jobId}: Image refresh failed:`, error);
+        res.status(500).json({ error: 'Failed to refresh image: ' + error.message });
+    }
+});
+
+// Audio preview endpoints for script mode
+app.get('/api/preview-audio/speech/:jobId', (req, res) => {
+    const { jobId } = req.params;
+    const job = activeJobs.get(jobId);
+    
+    if (!job || !job.pauseData || !job.pauseData.speechPath) {
+        return res.status(404).json({ error: 'Speech audio not found' });
+    }
+    
+    const speechPath = job.pauseData.speechPath;
+    const fs = require('fs');
+    
+    if (!fs.existsSync(speechPath)) {
+        return res.status(404).json({ error: 'Speech file not found on disk' });
+    }
+    
+    res.setHeader('Content-Type', 'audio/mpeg');
+    res.setHeader('Content-Disposition', 'inline; filename="speech_preview.mp3"');
+    res.sendFile(path.resolve(speechPath));
+});
+
+app.get('/api/preview-audio/music/:jobId', (req, res) => {
+    const { jobId } = req.params;
+    const job = activeJobs.get(jobId);
+    
+    if (!job || !job.pauseData || !job.pauseData.musicPath) {
+        return res.status(404).json({ error: 'Background music not found' });
+    }
+    
+    const musicPath = job.pauseData.musicPath;
+    const fs = require('fs');
+    
+    if (!fs.existsSync(musicPath)) {
+        return res.status(404).json({ error: 'Music file not found on disk' });
+    }
+    
+    res.setHeader('Content-Type', 'audio/mpeg');
+    res.setHeader('Content-Disposition', 'inline; filename="music_preview.mp3"');
+    res.sendFile(path.resolve(musicPath));
+});
+
+// Refresh speech audio (detailed script mode)
+app.post('/api/refresh-audio/speech/:jobId', async (req, res) => {
+    const { jobId } = req.params;
+    const { newVoiceId, scriptText } = req.body;
+    
+    const job = activeJobs.get(jobId);
+    if (!job || !job.pauseData || !job.pauseData.isScriptMode) {
+        return res.status(404).json({ error: 'Script job not found' });
+    }
+    
+    if (!newVoiceId || !scriptText) {
+        return res.status(400).json({ error: 'Voice ID and script text are required' });
+    }
+    
+    try {
+        Logger.info(`🔄 Job ${jobId}: Refreshing speech with voice "${newVoiceId}"`);
+        
+        const ElevenLabsService = require('./elevenLabsService');
+        const elevenLabsService = new ElevenLabsService();
+        
+        // Generate new speech with the selected voice
+        const newSpeechPath = await elevenLabsService.generateSpeech(scriptText, newVoiceId);
+        
+        // Update the job data
+        job.pauseData.speechPath = newSpeechPath;
+        job.pauseData.scriptOptions.voiceId = newVoiceId;
+        job.pauseData.audioPreview.speechPath = newSpeechPath;
+        job.pauseData.audioPreview.speechUrl = `/api/preview-audio/speech/${jobId}`;
+        
+        Logger.success(`🔄 Job ${jobId}: Speech refreshed with voice "${newVoiceId}"`);
+        
+        res.json({ 
+            success: true, 
+            speechUrl: `/api/preview-audio/speech/${jobId}`,
+            voiceId: newVoiceId
+        });
+        
+    } catch (error) {
+        Logger.error(`❌ Job ${jobId}: Speech refresh failed:`, error);
+        res.status(500).json({ error: 'Failed to refresh speech: ' + error.message });
+    }
+});
+
+// Refresh background music (detailed script mode)
+app.post('/api/refresh-audio/music/:jobId', async (req, res) => {
+    const { jobId } = req.params;
+    const { newMusicSearch } = req.body;
+    
+    const job = activeJobs.get(jobId);
+    if (!job || !job.pauseData || !job.pauseData.isScriptMode) {
+        return res.status(404).json({ error: 'Script job not found' });
+    }
+    
+    if (!newMusicSearch) {
+        return res.status(400).json({ error: 'Music search term is required' });
+    }
+    
+    try {
+        Logger.info(`🔄 Job ${jobId}: Refreshing music with search "${newMusicSearch}"`);
+        
+        const MusicDownloadService = require('./musicDownloadService');
+        const musicDownloadService = new MusicDownloadService();
+        
+        // Download new background music
+        const newMusicPath = await musicDownloadService.downloadMusicBySearchTerms(newMusicSearch);
+        
+        // Update the job data
+        job.pauseData.musicPath = newMusicPath;
+        job.pauseData.scriptOptions.musicSearch = newMusicSearch;
+        job.pauseData.audioPreview.musicPath = newMusicPath;
+        job.pauseData.audioPreview.musicUrl = `/api/preview-audio/music/${jobId}`;
+        
+        Logger.success(`🔄 Job ${jobId}: Music refreshed with search "${newMusicSearch}"`);
+        
+        res.json({ 
+            success: true, 
+            musicUrl: `/api/preview-audio/music/${jobId}`,
+            musicSearch: newMusicSearch
+        });
+        
+    } catch (error) {
+        Logger.error(`❌ Job ${jobId}: Music refresh failed:`, error);
+        res.status(500).json({ error: 'Failed to refresh music: ' + error.message });
+    }
+});
+
+// Continue with reviewed keywords and images (detailed mode)
+app.post('/api/continue/:jobId', (req, res) => {
+    const { jobId } = req.params;
+    const { keywords, images } = req.body;
+    
+    const job = activeJobs.get(jobId);
+    if (!job) {
+        return res.status(404).json({ error: 'Job not found' });
+    }
+    
+    if (!keywords || !Array.isArray(keywords)) {
+        return res.status(400).json({ error: 'Keywords array is required' });
+    }
+    
+    // Store the reviewed keywords and images in the job
+    job.reviewedKeywords = keywords;
+    job.reviewedImages = images;
+    job.status = 'keywords_reviewed';
+    job.message = 'Keywords and images reviewed, continuing generation...';
+    job.progress = 60;
+    
+    Logger.info(`🔍 Job ${jobId}: Keywords and images reviewed by user, continuing generation`);
     
     // Continue generation in background
-    continueDetailedGeneration(jobId, keywords);
+    continueDetailedGeneration(jobId, keywords, images);
     
     res.json({ message: 'Keywords received, continuing generation' });
 });
@@ -351,7 +599,7 @@ async function generateScriptVideoAsync(jobId, scriptText, options) {
         };
 
         // Race between generation and timeout
-        const outputPath = await Promise.race([
+        const result = await Promise.race([
             (async () => {
                 try {
                     return await generator.generateVideoFromScript(scriptText, options);
@@ -367,7 +615,25 @@ async function generateScriptVideoAsync(jobId, scriptText, options) {
         Logger.info = originalInfo;
         Logger.error = originalError;
         
-        const filename = path.basename(outputPath);
+        // Check if result is pause data for detailed mode
+        if (result && result.isPause) {
+            Logger.info(`🔍 Job ${jobId}: Pausing for keyword review in detailed script mode`);
+            
+            // Store the pause data with job info for later retrieval
+            const currentJob = activeJobs.get(jobId);
+            activeJobs.set(jobId, {
+                ...currentJob,
+                status: 'keywords_extracted',
+                progress: 60,
+                message: 'Keywords extracted! Ready for review.',
+                keywords: result.keywords,
+                database: result.database || options.database || 'apu',  // Ensure database is set
+                pauseData: result  // Store all pause data
+            });
+            return;
+        }
+        
+        const filename = path.basename(result);
         updateJob('completed', 100, 'Script video generated successfully!', filename);
         
     } catch (error) {
@@ -539,8 +805,8 @@ app.listen(PORT, () => {
     console.log('='.repeat(60) + '\n');
 });
 
-// Continue detailed generation after keyword review
-async function continueDetailedGeneration(jobId, reviewedKeywords) {
+// Continue detailed generation after keyword and image review
+async function continueDetailedGeneration(jobId, reviewedKeywords, reviewedImages = null) {
     const updateJob = (status, progress, message, outputPath = null) => {
         try {
             const currentJob = activeJobs.get(jobId);
@@ -565,8 +831,38 @@ async function continueDetailedGeneration(jobId, reviewedKeywords) {
         }
 
         // Reconstruct keyword data from reviewed keywords
+        // Debug logging to understand the structure
+        Logger.info(`🔍 Debug: job.pauseData exists: ${!!job.pauseData}`);
+        Logger.info(`🔍 Debug: job.pauseData.isScriptMode: ${job.pauseData?.isScriptMode}`);
+        Logger.info(`🔍 Debug: job.keywordData exists: ${!!job.keywordData}`);
+        Logger.info(`🔍 Debug: reviewedKeywords length: ${reviewedKeywords?.length}`);
+        Logger.info(`🔍 Debug: reviewedKeywords:`, JSON.stringify(reviewedKeywords, null, 2));
+        
+        // Get original keyword data from the right place depending on mode
+        const originalKeywordData = job.pauseData && job.pauseData.isScriptMode 
+            ? job.pauseData.keywordData 
+            : job.keywordData;
+            
+        Logger.info(`🔍 Debug: originalKeywordData exists: ${!!originalKeywordData}`);
+        Logger.info(`🔍 Debug: originalKeywordData length: ${originalKeywordData?.length}`);
+        
+        if (!originalKeywordData) {
+            throw new Error('Original keyword data not found in job');
+        }
+        
+        if (!reviewedKeywords || !Array.isArray(reviewedKeywords) || reviewedKeywords.length === 0) {
+            throw new Error(`Invalid reviewedKeywords: ${JSON.stringify(reviewedKeywords)}`);
+        }
+        
         const keywordData = reviewedKeywords.map((reviewedKeyword, index) => {
-            const originalKeyword = job.keywordData[index];
+            const originalKeyword = originalKeywordData[index];
+            if (!originalKeyword) {
+                throw new Error(`Original keyword not found at index ${index}`);
+            }
+            
+            Logger.info(`🔍 Debug: Mapping keyword ${index}: ${reviewedKeyword.keyword}`);
+            Logger.info(`🔍 Debug: Original keyword structure:`, JSON.stringify(originalKeyword, null, 2));
+            
             return {
                 ...originalKeyword,
                 keyword: reviewedKeyword.keyword
@@ -582,22 +878,47 @@ async function continueDetailedGeneration(jobId, reviewedKeywords) {
                 
                 // Update progress based on message content
                 if (message.includes('Step 4/6')) updateJob('running', 60, 'Searching for memes...');
+                else if (message.includes('Step 5/7')) updateJob('running', 65, 'Searching for memes...');
                 else if (message.includes('Meme search completed')) updateJob('running', 70, 'Memes collected! Creating slides...');
                 else if (message.includes('Step 5/6')) updateJob('running', 80, 'Rendering slides...');
                 else if (message.includes('Step 6/6')) updateJob('running', 90, 'Creating final video...');
+                else if (message.includes('Step 6/7')) updateJob('running', 85, 'Rendering slides...');
+                else if (message.includes('Step 7/7')) updateJob('running', 90, 'Creating final video with mixed audio...');
                 else if (message.includes('Meme video generation completed')) updateJob('running', 95, 'Video complete! Preparing download...');
+                else if (message.includes('Script detailed video generation completed')) updateJob('running', 95, 'Video complete! Preparing download...');
             } catch (err) {
                 originalInfo(message, data);
             }
         };
 
         // Continue generation from where we left off
-        const outputPath = await generator.continueDetailedGeneration(
-            keywordData,
-            job.audioPath,
-            job.thumbnailMemeUrl,
-            { database: job.database || 'apu' }
-        );
+        let outputPath;
+        
+        // Check if this is script mode or YouTube mode
+        if (job.pauseData && job.pauseData.isScriptMode) {
+            // Script mode - use script-specific continuation
+            outputPath = await generator.continueDetailedScriptGeneration(
+                keywordData,
+                job.pauseData.speechPath,
+                job.pauseData.musicPath,
+                { 
+                    database: job.database || 'apu',
+                    preselectedImages: reviewedImages,
+                    scriptOptions: job.pauseData.scriptOptions
+                }
+            );
+        } else {
+            // YouTube mode - use original continuation
+            outputPath = await generator.continueDetailedGeneration(
+                keywordData,
+                job.audioPath,
+                job.thumbnailMemeUrl,
+                { 
+                    database: job.database || 'apu',
+                    preselectedImages: reviewedImages
+                }
+            );
+        }
 
         // Restore original logger
         Logger.info = originalInfo;

@@ -376,19 +376,33 @@
             </div>
 
             <div class="form-group">
-                <label>Meme Database</label>
+                <label>Content Source</label>
+                <div class="radio-group">
+                    <label class="radio-option">
+                        <input type="radio" name="contentMode" value="youtube" checked>
+                        <span class="radio-label">📺 YouTube</span>
+                    </label>
+                    <label class="radio-option">
+                        <input type="radio" name="contentMode" value="script">
+                        <span class="radio-label">📝 Script</span>
+                    </label>
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label>Image Database</label>
                 <div class="radio-group">
                     <label class="radio-option">
                         <input type="radio" name="database" value="apu" checked>
-                        <span class="radio-label">🐸 Apu</span>
+                        <span class="radio-label">🐸 Apu Memes</span>
                     </label>
                     <label class="radio-option">
                         <input type="radio" name="database" value="bobo">
-                        <span class="radio-label">🐻 Bobo</span>
+                        <span class="radio-label">🐻 Bobo Memes</span>
                     </label>
                     <label class="radio-option">
                         <input type="radio" name="database" value="other">
-                        <span class="radio-label">🎭 Other</span>
+                        <span class="radio-label">📷 Photos</span>
                     </label>
                 </div>
             </div>
@@ -459,6 +473,8 @@
             <p style="color: #e53e3e;" id="errorMessage">An error occurred during video generation.</p>
         </div>
 
+
+
         <!-- Keyword Review Interface for Detailed Mode -->
         <div class="keyword-review-container" id="keywordReviewContainer" style="display: none;">
             <div style="background: #f7fafc; border: 2px solid #e2e8f0; border-radius: 12px; padding: 24px; margin-top: 20px;">
@@ -477,6 +493,29 @@
                     </button>
                     <button type="button" class="button" id="regenerateKeywords" style="flex: 1; background: linear-gradient(135deg, #ed8936, #dd6b20);">
                         🔄 Regenerate Keywords
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Image Preview Container -->
+        <div id="image-preview-container" style="display: none;">
+            <div style="background: white; padding: 2rem; border-radius: 16px; box-shadow: 0 10px 40px rgba(0,0,0,0.1); border: 1px solid #e2e8f0; margin-bottom: 2rem;">
+                <h2 style="margin: 0 0 1.5rem 0; color: #2d3748; font-size: 1.5rem; text-align: center;">
+                    🖼️ Preview Selected Images
+                </h2>
+                                 <div style="background: #f7fafc; padding: 1rem; border-radius: 8px; margin-bottom: 1.5rem; border-left: 4px solid #805ad5;">
+                     <p style="margin: 0; color: #2d3748; font-size: 0.95rem;">
+                         Review the images selected for each keyword. Click the refresh button to get a different image for any keyword.
+                     </p>
+                 </div>
+                <div id="image-preview-list" style="display: flex; flex-direction: column; gap: 16px;"></div>
+                <div style="display: flex; gap: 1rem; margin-top: 2rem; justify-content: center; flex-wrap: wrap;">
+                    <button id="continue-with-images" style="background: linear-gradient(45deg, #38a169, #48bb78); color: white; border: none; padding: 12px 24px; border-radius: 8px; font-weight: 600; cursor: pointer; transition: all 0.3s ease; box-shadow: 0 4px 12px rgba(56, 161, 105, 0.3);">
+                        ✅ Continue with These Images
+                    </button>
+                    <button id="back-to-keywords" style="background: linear-gradient(45deg, #718096, #a0aec0); color: white; border: none; padding: 12px 24px; border-radius: 8px; font-weight: 600; cursor: pointer; transition: all 0.3s ease; box-shadow: 0 4px 12px rgba(113, 128, 150, 0.3);">
+                        ⬅️ Back to Keywords
                     </button>
                 </div>
             </div>
@@ -506,6 +545,15 @@
         const keywordList = document.getElementById('keywordList');
         const continueWithKeywords = document.getElementById('continueWithKeywords');
         const regenerateKeywords = document.getElementById('regenerateKeywords');
+        
+
+        
+        // Image Preview Elements
+        const imagePreviewContainer = document.getElementById('image-preview-container');
+        const imagePreviewList = document.getElementById('image-preview-list');
+        const continueWithImages = document.getElementById('continue-with-images');
+        const backToKeywords = document.getElementById('back-to-keywords');
+        
         const downloadBtn = document.getElementById('downloadBtn');
         const generateAgainBtn = document.getElementById('generateAgainBtn');
         const cleanupBtn = document.getElementById('cleanupBtn');
@@ -525,7 +573,10 @@
         let currentJobId = null;
         let eventSource = null;
         let currentKeywords = null;
+        let currentImages = [];
         let lastGenerationData = null;
+        let currentScriptText = null;
+        let audioPreviewData = null;
 
         // Load available voices from API
         async function loadVoices() {
@@ -574,11 +625,11 @@
                 });
             });
             
-            const databaseRadios = document.querySelectorAll('input[name="database"]');
+            const contentModeRadios = document.querySelectorAll('input[name="contentMode"]');
             
-            databaseRadios.forEach(radio => {
+            contentModeRadios.forEach(radio => {
                 radio.addEventListener('change', function() {
-                    if (this.value === 'other') {
+                    if (this.value === 'script') {
                         // Switch to script mode
                         youtubeGroup.style.display = 'none';
                         timeRangeGroup.style.display = 'none';
@@ -605,7 +656,7 @@
                         soundSourceGroup.style.display = 'none';
                         
                         // Update button text
-                        generateBtn.innerHTML = '🚀 Generate Meme Video';
+                        generateBtn.innerHTML = '🚀 Generate Video';
                         
                         // Update validation
                         youtubeUrlInput.required = true;
@@ -620,6 +671,7 @@
             
             const formData = new FormData(form);
             const database = formData.get('database') || 'apu';
+            const contentMode = formData.get('contentMode') || 'youtube';
             
             let data = {
                 database: database,
@@ -629,7 +681,7 @@
             };
 
             // Determine mode and add appropriate fields
-            if (database === 'other') {
+            if (contentMode === 'script') {
                 // Script mode
                 data.scriptText = formData.get('scriptText');
                 data.voiceId = formData.get('voiceId');
@@ -716,8 +768,24 @@
                     eventSource.close();
                     resetForm();
                 } else if (job.status === 'keywords_extracted') {
-                    // Show keyword review interface for detailed mode
+                    // Store keywords and any audio data
                     currentKeywords = job.keywords;
+                    
+                    // If this is script mode, store audio preview data
+                    if (job.pauseData && job.pauseData.isScriptMode && job.pauseData.audioPreview) {
+                        audioPreviewData = {
+                            speechUrl: job.pauseData.audioPreview.speechUrl,
+                            musicUrl: job.pauseData.audioPreview.musicUrl,
+                            currentVoiceId: job.pauseData.scriptOptions.voiceId,
+                            currentMusicSearch: job.pauseData.scriptOptions.musicSearch
+                        };
+                        
+                        // Store the script text from form data
+                        const formData = new FormData(form);
+                        currentScriptText = formData.get('scriptText');
+                    }
+                    
+                    // Show keyword review interface for detailed mode (both YouTube and Script)
                     showKeywordReview(job.keywords);
                     eventSource.close();
                 }
@@ -781,7 +849,11 @@
             resultContainer.style.display = 'none';
             errorContainer.style.display = 'none';
             keywordReviewContainer.style.display = 'none';
+            imagePreviewContainer.style.display = 'none';
+
         }
+
+
 
         function showKeywordReview(keywords) {
             hideAllContainers();
@@ -832,16 +904,300 @@
             })).filter(item => item.keyword.length > 0);
         }
 
+        function showImagePreview(images) {
+            hideAllContainers();
+            imagePreviewContainer.style.display = 'block';
+            
+            // Clear previous images
+            imagePreviewList.innerHTML = '';
+            
+            // Check if this is script mode and add audio controls
+            const selectedContentMode = document.querySelector('input[name="contentMode"]:checked')?.value;
+            const isScriptMode = selectedContentMode === 'script';
+            
+            if (isScriptMode && audioPreviewData) {
+                addAudioControlsToImagePreview();
+            }
+            
+            // Create preview for each image
+            images.forEach((imageData, index) => {
+                const imageItem = document.createElement('div');
+                imageItem.style.cssText = 'display: grid; grid-template-columns: 80px 1fr 200px 100px; gap: 16px; align-items: center; padding: 16px; background: white; border: 1px solid #e2e8f0; border-radius: 8px;';
+                
+                const timeLabel = document.createElement('span');
+                timeLabel.textContent = imageData.timestamp;
+                timeLabel.style.cssText = 'font-family: monospace; font-size: 0.9rem; color: #4a5568; text-align: center; background: #f7fafc; padding: 6px 8px; border-radius: 4px; min-width: 60px;';
+                
+                const keywordText = document.createElement('div');
+                keywordText.style.cssText = 'display: flex; flex-direction: column; gap: 4px;';
+                
+                const keywordLabel = document.createElement('strong');
+                keywordLabel.textContent = imageData.keyword;
+                keywordLabel.style.cssText = 'color: #2d3748; font-size: 1rem;';
+                
+                const lyricsText = document.createElement('div');
+                lyricsText.textContent = `"${imageData.lyrics || 'No lyrics available'}"`;
+                lyricsText.style.cssText = 'font-style: italic; color: #718096; font-size: 0.85rem;';
+                
+                keywordText.appendChild(keywordLabel);
+                keywordText.appendChild(lyricsText);
+                
+                const imageContainer = document.createElement('div');
+                imageContainer.style.cssText = 'position: relative; width: 200px; height: 150px; border-radius: 8px; overflow: hidden; background: #f7fafc; display: flex; align-items: center; justify-content: center;';
+                
+                const image = document.createElement('img');
+                image.src = imageData.imageUrl;
+                image.style.cssText = 'max-width: 100%; max-height: 100%; object-fit: contain; border-radius: 6px;';
+                image.onerror = () => {
+                    image.style.display = 'none';
+                    const placeholder = document.createElement('div');
+                    placeholder.textContent = '❌ Failed to load';
+                    placeholder.style.cssText = 'color: #e53e3e; font-size: 0.8rem; text-align: center;';
+                    imageContainer.appendChild(placeholder);
+                };
+                
+                const loadingOverlay = document.createElement('div');
+                loadingOverlay.style.cssText = 'position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: rgba(255,255,255,0.9); display: none; align-items: center; justify-content: center; border-radius: 8px;';
+                loadingOverlay.innerHTML = '<div style="color: #4299e1; font-size: 0.9rem;">🔄 Loading...</div>';
+                
+                imageContainer.appendChild(image);
+                imageContainer.appendChild(loadingOverlay);
+                
+                const refreshButton = document.createElement('button');
+                refreshButton.textContent = '🔄 Refresh';
+                refreshButton.style.cssText = 'background: linear-gradient(45deg, #4299e1, #63b3ed); color: white; border: none; padding: 8px 16px; border-radius: 6px; font-weight: 600; cursor: pointer; transition: all 0.3s ease; height: fit-content;';
+                refreshButton.onclick = () => refreshImage(index, loadingOverlay, image, imageData.keyword);
+                
+                imageItem.appendChild(timeLabel);
+                imageItem.appendChild(keywordText);
+                imageItem.appendChild(imageContainer);
+                imageItem.appendChild(refreshButton);
+                imagePreviewList.appendChild(imageItem);
+            });
+        }
+
+        // Add audio controls to image preview for script mode
+        function addAudioControlsToImagePreview() {
+            // Create audio controls section
+            const audioSection = document.createElement('div');
+            audioSection.style.cssText = 'background: #f0fff4; border: 2px solid #9ae6b4; border-radius: 12px; padding: 20px; margin-bottom: 20px;';
+            
+            const audioTitle = document.createElement('h3');
+            audioTitle.textContent = '🎵 Audio Preview & Controls';
+            audioTitle.style.cssText = 'color: #2d3748; margin: 0 0 16px 0; text-align: center; font-size: 1.2rem;';
+            
+            const audioGrid = document.createElement('div');
+            audioGrid.style.cssText = 'display: grid; grid-template-columns: 1fr 1fr; gap: 20px;';
+            
+            // Speech controls
+            const speechDiv = document.createElement('div');
+            speechDiv.style.cssText = 'background: white; padding: 16px; border-radius: 8px; border: 1px solid #e2e8f0;';
+            speechDiv.innerHTML = `
+                <h4 style="margin: 0 0 12px 0; color: #2d3748; font-size: 1rem;">🗣️ Speech Audio</h4>
+                <audio id="speechPreviewInImages" controls style="width: 100%; margin-bottom: 12px;">
+                    Your browser does not support the audio element.
+                </audio>
+                <div style="display: flex; gap: 8px; align-items: center;">
+                    <select id="voiceSelectorInImages" style="flex: 1; padding: 8px; border: 1px solid #e2e8f0; border-radius: 4px; font-size: 0.9rem;">
+                        <!-- Will be populated -->
+                    </select>
+                    <button id="refreshSpeechInImages" style="background: linear-gradient(45deg, #4299e1, #63b3ed); color: white; border: none; padding: 8px 16px; border-radius: 4px; font-weight: 600; cursor: pointer; font-size: 0.9rem;">
+                        🔄 Refresh
+                    </button>
+                </div>
+            `;
+            
+            // Music controls
+            const musicDiv = document.createElement('div');
+            musicDiv.style.cssText = 'background: white; padding: 16px; border-radius: 8px; border: 1px solid #e2e8f0;';
+            musicDiv.innerHTML = `
+                <h4 style="margin: 0 0 12px 0; color: #2d3748; font-size: 1rem;">🎵 Background Music</h4>
+                <audio id="musicPreviewInImages" controls style="width: 100%; margin-bottom: 12px;">
+                    Your browser does not support the audio element.
+                </audio>
+                <div style="display: flex; gap: 8px; align-items: center;">
+                    <input type="text" id="musicSearchInImages" placeholder="e.g. dramatic, peaceful, energetic..." style="flex: 1; padding: 8px; border: 1px solid #e2e8f0; border-radius: 4px; font-size: 0.9rem;">
+                    <button id="refreshMusicInImages" style="background: linear-gradient(45deg, #48bb78, #38a169); color: white; border: none; padding: 8px 16px; border-radius: 4px; font-weight: 600; cursor: pointer; font-size: 0.9rem;">
+                        🔄 Refresh
+                    </button>
+                </div>
+            `;
+            
+            audioGrid.appendChild(speechDiv);
+            audioGrid.appendChild(musicDiv);
+            audioSection.appendChild(audioTitle);
+            audioSection.appendChild(audioGrid);
+            
+            // Insert at the beginning of image preview list
+            imagePreviewList.insertBefore(audioSection, imagePreviewList.firstChild);
+            
+            // Set up audio sources and populate controls
+            setupAudioControlsInImagePreview();
+        }
+
+        function setupAudioControlsInImagePreview() {
+            const speechAudio = document.getElementById('speechPreviewInImages');
+            const musicAudio = document.getElementById('musicPreviewInImages');
+            const voiceSelect = document.getElementById('voiceSelectorInImages');
+            const musicInput = document.getElementById('musicSearchInImages');
+            const refreshSpeechBtn = document.getElementById('refreshSpeechInImages');
+            const refreshMusicBtn = document.getElementById('refreshMusicInImages');
+            
+            if (audioPreviewData) {
+                // Set audio sources
+                speechAudio.src = audioPreviewData.speechUrl + '?t=' + Date.now();
+                musicAudio.src = audioPreviewData.musicUrl + '?t=' + Date.now();
+                
+                // Populate voice selector
+                const mainVoiceSelect = document.getElementById('voiceId');
+                voiceSelect.innerHTML = '';
+                for (let i = 0; i < mainVoiceSelect.options.length; i++) {
+                    const option = mainVoiceSelect.options[i];
+                    const newOption = new Option(option.text, option.value);
+                    if (option.value === audioPreviewData.currentVoiceId) {
+                        newOption.selected = true;
+                    }
+                    voiceSelect.appendChild(newOption);
+                }
+                
+                // Set music search value
+                musicInput.value = audioPreviewData.currentMusicSearch || '';
+            }
+            
+            // Add event listeners
+            refreshSpeechBtn.addEventListener('click', async () => {
+                const selectedVoiceId = voiceSelect.value;
+                
+                if (!selectedVoiceId || !currentScriptText) {
+                    alert('Please select a voice and ensure script text is available');
+                    return;
+                }
+                
+                refreshSpeechBtn.disabled = true;
+                refreshSpeechBtn.textContent = '🔄 Generating...';
+                
+                try {
+                    const response = await fetch(`/api/refresh-audio/speech/${currentJobId}`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ 
+                            newVoiceId: selectedVoiceId,
+                            scriptText: currentScriptText
+                        })
+                    });
+                    
+                    const result = await response.json();
+                    
+                    if (!response.ok) {
+                        throw new Error(result.error);
+                    }
+                    
+                    // Update audio source
+                    speechAudio.src = result.speechUrl + '?t=' + Date.now();
+                    speechAudio.load();
+                    
+                    // Update stored data
+                    if (audioPreviewData) {
+                        audioPreviewData.currentVoiceId = selectedVoiceId;
+                        audioPreviewData.speechUrl = result.speechUrl;
+                    }
+                    
+                } catch (error) {
+                    alert('Failed to refresh speech: ' + error.message);
+                } finally {
+                    refreshSpeechBtn.disabled = false;
+                    refreshSpeechBtn.textContent = '🔄 Refresh';
+                }
+            });
+            
+            refreshMusicBtn.addEventListener('click', async () => {
+                const newMusicSearch = musicInput.value.trim();
+                
+                if (!newMusicSearch) {
+                    alert('Please enter a music search term');
+                    return;
+                }
+                
+                refreshMusicBtn.disabled = true;
+                refreshMusicBtn.textContent = '🔄 Downloading...';
+                
+                try {
+                    const response = await fetch(`/api/refresh-audio/music/${currentJobId}`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ 
+                            newMusicSearch: newMusicSearch
+                        })
+                    });
+                    
+                    const result = await response.json();
+                    
+                    if (!response.ok) {
+                        throw new Error(result.error);
+                    }
+                    
+                    // Update audio source
+                    musicAudio.src = result.musicUrl + '?t=' + Date.now();
+                    musicAudio.load();
+                    
+                    // Update stored data
+                    if (audioPreviewData) {
+                        audioPreviewData.currentMusicSearch = newMusicSearch;
+                        audioPreviewData.musicUrl = result.musicUrl;
+                    }
+                    
+                } catch (error) {
+                    alert('Failed to refresh music: ' + error.message);
+                } finally {
+                    refreshMusicBtn.disabled = false;
+                    refreshMusicBtn.textContent = '🔄 Refresh';
+                }
+            });
+        }
+
+        async function refreshImage(index, loadingOverlay, imageElement, keyword) {
+            loadingOverlay.style.display = 'flex';
+            
+            try {
+                const response = await fetch(`/api/refresh-image/${currentJobId}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ 
+                        keyword: keyword,
+                        index: index,
+                        database: document.querySelector('input[name="database"]:checked')?.value || 'apu'
+                    })
+                });
+                
+                const result = await response.json();
+                
+                if (!response.ok) {
+                    throw new Error(result.error);
+                }
+                
+                // Update the image
+                imageElement.src = result.imageUrl;
+                currentImages[index].imageUrl = result.imageUrl;
+                
+            } catch (error) {
+                alert('Failed to refresh image: ' + error.message);
+            } finally {
+                loadingOverlay.style.display = 'none';
+            }
+        }
+
         function resetForm() {
             generateBtn.disabled = false;
             // Check current mode to set appropriate button text
-            const selectedDatabase = document.querySelector('input[name="database"]:checked').value;
-            if (selectedDatabase === 'other') {
+            const selectedContentMode = document.querySelector('input[name="contentMode"]:checked')?.value;
+            if (selectedContentMode === 'script') {
                 generateBtn.textContent = '🚀 Generate Video';
             } else {
-                generateBtn.textContent = '🚀 Generate Meme Video';
+                generateBtn.textContent = '🚀 Generate Video';
             }
         }
+
+
 
         // Handle keyword review actions
         continueWithKeywords.addEventListener('click', async () => {
@@ -854,10 +1210,11 @@
             
             continueWithKeywords.disabled = true;
             regenerateKeywords.disabled = true;
-            continueWithKeywords.textContent = '🔄 Continuing...';
+            continueWithKeywords.textContent = '🔄 Fetching Images...';
             
             try {
-                const response = await fetch(`/api/continue/${currentJobId}`, {
+                // Fetch preview images for the keywords
+                const response = await fetch(`/api/preview-images/${currentJobId}`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ keywords: updatedKeywords })
@@ -869,21 +1226,12 @@
                     throw new Error(result.error);
                 }
                 
-                // Hide keyword review and show progress
-                hideAllContainers();
-                progressContainer.style.display = 'block';
+                // Store current keywords and images
+                currentKeywords = updatedKeywords;
+                currentImages = result.images;
                 
-                // Save generation data for "Generate Again" feature
-                lastGenerationData = {
-                    youtubeUrl: document.getElementById('youtubeUrl').value,
-                    database: document.querySelector('input[name="database"]:checked')?.value,
-                    startTime: document.getElementById('startTime').value,
-                    endTime: document.getElementById('endTime').value,
-                    keywords: updatedKeywords
-                };
-                
-                // Resume progress stream
-                startProgressStream(currentJobId);
+                // Show image preview interface
+                showImagePreview(result.images);
                 
             } catch (error) {
                 showError(error.message);
@@ -893,6 +1241,59 @@
                 regenerateKeywords.disabled = false;
                 continueWithKeywords.textContent = '✅ Continue with These Keywords';
             }
+        });
+
+        // Handle image preview actions
+        continueWithImages.addEventListener('click', async () => {
+            continueWithImages.disabled = true;
+            backToKeywords.disabled = true;
+            continueWithImages.textContent = '🔄 Continuing...';
+            
+            try {
+                const response = await fetch(`/api/continue/${currentJobId}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ 
+                        keywords: currentKeywords,
+                        images: currentImages
+                    })
+                });
+                
+                const result = await response.json();
+                
+                if (!response.ok) {
+                    throw new Error(result.error);
+                }
+                
+                // Hide image preview and show progress
+                hideAllContainers();
+                progressContainer.style.display = 'block';
+                
+                // Save generation data for "Generate Again" feature
+                lastGenerationData = {
+                    youtubeUrl: document.getElementById('youtubeUrl').value,
+                    database: document.querySelector('input[name="database"]:checked')?.value,
+                    startTime: document.getElementById('startTime').value,
+                    endTime: document.getElementById('endTime').value,
+                    keywords: currentKeywords
+                };
+                
+                // Resume progress stream
+                startProgressStream(currentJobId);
+                
+            } catch (error) {
+                showError(error.message);
+                resetForm();
+            } finally {
+                continueWithImages.disabled = false;
+                backToKeywords.disabled = false;
+                continueWithImages.textContent = '✅ Continue with These Images';
+            }
+        });
+
+        backToKeywords.addEventListener('click', () => {
+            // Go back to keyword review
+            showKeywordReview(currentKeywords);
         });
 
         regenerateKeywords.addEventListener('click', async () => {

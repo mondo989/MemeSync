@@ -111,8 +111,8 @@ class PuppeteerScraper {
      * @param {Array} keywords - Array of keyword strings to search for
      * @returns {Array} - Array of {keyword, memeUrl} objects (memeUrl contains photo URL)
      */
-    async searchPhotosForKeywords(keywords) {
-        Logger.info(`📷 Starting CC0 photo search for ${keywords.length} keywords from Pexels`);
+    async searchPhotosForKeywords(keywords, photoSource = 'pexels') {
+        Logger.info(`📷 Starting CC0 photo search for ${keywords.length} keywords from ${photoSource}`);
         Logger.info('🔄 Using separate browser instances for complete isolation between searches');
         
         const results = [];
@@ -130,7 +130,7 @@ class PuppeteerScraper {
                 const maxRetries = 5; // Prevent infinite loops
                 
                 do {
-                    photoUrl = await this.searchSingleKeywordPhoto(keyword, selectedUrls);
+                    photoUrl = await this.searchSingleKeywordPhoto(keyword, selectedUrls, photoSource);
                     retryCount++;
                     
                     if (selectedUrls.includes(photoUrl)) {
@@ -684,7 +684,7 @@ class PuppeteerScraper {
      * @param {Array} selectedUrls - Array of already selected URLs to avoid duplicates
      * @returns {string} - Photo image URL
      */
-    async searchSingleKeywordPhoto(keyword, selectedUrls = []) {
+    async searchSingleKeywordPhoto(keyword, selectedUrls = [], photoSource = 'pexels') {
         let browser = null;
         
         try {
@@ -734,87 +734,92 @@ class PuppeteerScraper {
             await page.setUserAgent('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
             await page.setViewport({ width: 1280, height: 720 });
             
-            // Navigate to Pexels search
-            const searchUrl = `https://www.pexels.com/search/${encodeURIComponent(keyword)}`;
-            Logger.debug(`📷 Navigating to Pexels: ${searchUrl}`);
-            await page.goto(searchUrl, { waitUntil: 'domcontentloaded', timeout: 15000 });
+            // Get search URL and selectors based on photo source
+            const sourceConfig = this.getPhotoSourceConfig(photoSource, keyword);
+            Logger.debug(`📷 Navigating to ${photoSource}: ${sourceConfig.searchUrl}`);
+            await page.goto(sourceConfig.searchUrl, { waitUntil: 'domcontentloaded', timeout: 15000 });
             
             // Wait for images to load
-            Logger.debug('⏳ Waiting for Pexels images to load...');
-            await page.waitForTimeout(4000); // Increased wait time for Pexels
+            Logger.debug(`⏳ Waiting for ${photoSource} images to load...`);
+            await page.waitForTimeout(sourceConfig.waitTime);
             
             // Try to wait for the grid container and items
             try {
-                await page.waitForSelector('[class*="RowGrid_gridContainer"]', { timeout: 10000 });
-                Logger.debug('✅ Found Pexels grid container');
+                await page.waitForSelector(sourceConfig.containerSelector, { timeout: 10000 });
+                Logger.debug(`✅ Found ${photoSource} grid container`);
             } catch (waitError) {
-                Logger.debug('Using fallback wait for Pexels grid');
+                Logger.debug(`Using fallback wait for ${photoSource} grid`);
                 await page.waitForTimeout(3000);
             }
             
             // Wait for grid items to be present
             try {
-                await page.waitForSelector('[class*="RowItem_gridItem"]', { timeout: 8000 });
-                Logger.debug('✅ Found Pexels grid items');
+                await page.waitForSelector(sourceConfig.itemSelector, { timeout: 8000 });
+                Logger.debug(`✅ Found ${photoSource} grid items`);
             } catch (waitError) {
-                Logger.debug('Using fallback wait for Pexels items');
+                Logger.debug(`Using fallback wait for ${photoSource} items`);
                 await page.waitForTimeout(2000);
             }
             
-            // Extract image URLs from Pexels
-            Logger.debug('🖼️ Extracting photo URLs from Pexels...');
-            const photoUrls = await page.evaluate(() => {
-                // Look for grid items with the specific class pattern
-                const gridItems = document.querySelectorAll('[class*="RowItem_gridItem"]');
+            // Extract image URLs from photo source
+            Logger.debug(`🖼️ Extracting photo URLs from ${photoSource}...`);
+            const photoUrls = await page.evaluate((config, source) => {
+                // Look for grid items with the configured selectors
+                const gridItems = document.querySelectorAll(config.itemSelector);
                 const urls = [];
                 
-                console.log(`[PEXELS-EVAL] Found ${gridItems.length} grid items`);
+                console.log(`[${source.toUpperCase()}-EVAL] Found ${gridItems.length} grid items`);
                 
                 gridItems.forEach((item, index) => {
                     // Find img elements within each grid item
-                    const images = item.querySelectorAll('img[src*="pexels.com"]');
+                    const images = item.querySelectorAll(config.imageSelector);
                     
                     images.forEach(img => {
-                        if (img.srcset && img.src && img.src.includes('pexels.com')) {
-                            // Extract the 1200w URL from srcset
-                            const srcset = img.srcset;
+                        if (img.src && img.src.length > 10) {
+                            let photoUrl = img.src;
                             
-                            // Look for the 1200w version in the srcset
-                            const match = srcset.match(/([^,\s]+)\s+1200w/);
-                            if (match && match[1]) {
-                                let photoUrl = match[1];
-                                
-                                // Clean up any HTML entities
-                                photoUrl = photoUrl.replace(/&amp;/g, '&');
-                                
-                                console.log(`[PEXELS-EVAL] Found 1200w image: ${photoUrl.substring(0, 60)}...`);
-                                urls.push(photoUrl);
-                            } else {
-                                // Fallback: use the main src and modify it for higher resolution
-                                let photoUrl = img.src.replace(/&amp;/g, '&');
-                                
-                                // Try to get a higher resolution version
-                                if (photoUrl.includes('w=500')) {
-                                    photoUrl = photoUrl.replace('w=500', 'w=1200');
-                                } else if (photoUrl.includes('dpr=1')) {
-                                    photoUrl = photoUrl.replace('dpr=1', 'dpr=2');
+                            // Source-specific URL optimization
+                            if (source === 'pexels') {
+                                // For Pexels, try to get higher resolution from srcset
+                                if (img.srcset) {
+                                    const match = img.srcset.match(/([^,\s]+)\s+1200w/);
+                                    if (match && match[1]) {
+                                        photoUrl = match[1];
+                                    } else if (photoUrl.includes('w=500')) {
+                                        photoUrl = photoUrl.replace('w=500', 'w=1200');
+                                    }
                                 }
-                                
-                                console.log(`[PEXELS-EVAL] Using fallback image: ${photoUrl.substring(0, 60)}...`);
-                                urls.push(photoUrl);
+                            } else if (source === 'unsplash') {
+                                // For Unsplash, modify URL for higher resolution
+                                if (photoUrl.includes('w=400')) {
+                                    photoUrl = photoUrl.replace('w=400', 'w=1200');
+                                } else if (!photoUrl.includes('w=')) {
+                                    photoUrl += '&w=1200&q=80';
+                                }
+                            } else if (source === 'pixabay') {
+                                // For Pixabay, try to get webformatURL or higher resolution
+                                if (photoUrl.includes('_150.')) {
+                                    photoUrl = photoUrl.replace('_150.', '_1280.');
+                                }
                             }
+                            
+                            // Clean up any HTML entities
+                            photoUrl = photoUrl.replace(/&amp;/g, '&');
+                            
+                            console.log(`[${source.toUpperCase()}-EVAL] Found image: ${photoUrl.substring(0, 60)}...`);
+                            urls.push(photoUrl);
                         }
                     });
                 });
                 
-                console.log(`[PEXELS-EVAL] Total URLs extracted: ${urls.length}`);
+                console.log(`[${source.toUpperCase()}-EVAL] Total URLs extracted: ${urls.length}`);
                 return [...new Set(urls)]; // Remove duplicates
-            });
+            }, sourceConfig, photoSource);
             
-            Logger.debug(`📊 Found ${photoUrls.length} Pexels photos for "${keyword}"`);
+            Logger.debug(`📊 Found ${photoUrls.length} ${photoSource} photos for "${keyword}"`);
             
             if (photoUrls.length === 0) {
-                throw new Error(`No Pexels photos found for keyword: "${keyword}"`);
+                throw new Error(`No ${photoSource} photos found for keyword: "${keyword}"`);
             }
             
             // Filter out already selected URLs to prioritize unique selections
@@ -828,9 +833,9 @@ class PuppeteerScraper {
             const selectedUrl = urlsToChooseFrom[randomIndex];
             
             if (uniqueUrls.length > 0) {
-                Logger.debug(`🎲 Random selection from ${uniqueUrls.length} unique Pexels URLs: ${randomIndex + 1}/${uniqueUrls.length}`);
+                Logger.debug(`🎲 Random selection from ${uniqueUrls.length} unique ${photoSource} URLs: ${randomIndex + 1}/${uniqueUrls.length}`);
             } else {
-                Logger.debug(`🎲 Random selection from ${photoUrls.length} total Pexels URLs (no unique options): ${randomIndex + 1}/${photoUrls.length}`);
+                Logger.debug(`🎲 Random selection from ${photoUrls.length} total ${photoSource} URLs (no unique options): ${randomIndex + 1}/${photoUrls.length}`);
             }
             
             Logger.debug(`🔗 Selected photo URL: ${selectedUrl.substring(0, 80)}...`);
@@ -838,7 +843,7 @@ class PuppeteerScraper {
             return selectedUrl;
             
         } catch (error) {
-            Logger.error(`❌ Error searching Pexels photos for "${keyword}": ${error.message}`);
+            Logger.error(`❌ Error searching ${photoSource} photos for "${keyword}": ${error.message}`);
             Logger.debug('Detailed error:', error.stack);
             throw error;
         } finally {
@@ -1037,6 +1042,41 @@ class PuppeteerScraper {
         }
     }
 
+    /**
+     * Get photo source configuration for different providers
+     * @param {string} photoSource - Photo source (pexels, unsplash, pixabay)
+     * @param {string} keyword - Search keyword
+     * @returns {Object} - Source configuration with URL and selectors
+     */
+    getPhotoSourceConfig(photoSource, keyword) {
+        switch (photoSource.toLowerCase()) {
+            case 'unsplash':
+                return {
+                    searchUrl: `https://unsplash.com/s/photos/${encodeURIComponent(keyword)}`,
+                    containerSelector: '[data-test="photo-grid"]',
+                    itemSelector: '[data-test="photo-grid"] > div',
+                    imageSelector: 'img',
+                    waitTime: 4000
+                };
+            case 'pixabay':
+                return {
+                    searchUrl: `https://pixabay.com/images/search/${encodeURIComponent(keyword)}/`,
+                    containerSelector: '.items',
+                    itemSelector: '.item',
+                    imageSelector: 'img',
+                    waitTime: 3000
+                };
+            case 'pexels':
+            default:
+                return {
+                    searchUrl: `https://www.pexels.com/search/${encodeURIComponent(keyword)}`,
+                    containerSelector: '[class*="RowGrid_gridContainer"]',
+                    itemSelector: '[class*="RowItem_gridItem"]',
+                    imageSelector: 'img',
+                    waitTime: 4000
+                };
+        }
+    }
 
 }
 

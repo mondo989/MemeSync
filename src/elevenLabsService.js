@@ -6,8 +6,10 @@ class ElevenLabsService {
         this.apiKey = process.env.ELEVENLABS_API_KEY;
         this.baseUrl = 'https://api.elevenlabs.io/v1';
         
-        if (!this.apiKey) {
-            throw new Error('ELEVENLABS_API_KEY environment variable is required');
+        if (!this.apiKey || this.apiKey === 'sk-test-dummy-key-for-testing') {
+            this.isDevelopmentMode = true;
+            console.log('⚠️  Running in DEVELOPMENT MODE - using dummy audio files');
+            console.log('To use real text-to-speech, set a valid ELEVENLABS_API_KEY');
         }
     }
 
@@ -84,6 +86,7 @@ class ElevenLabsService {
             voice13: 'MF3mGyEYCl7XYWbV9V6O', // Elli - Ghostly and soft
             voice14: 'TX3LPaxmHKxFdv7VOQHJ', // Liam - Deep and ominous
             voice15: 'XB0fDUnXU5powFXDhCwa', // Charlotte - Mysterious female
+            voice16: '7NsaqHdLuKNFvEfjpUno', // Seer Morganna - Mystical oracle voice
         };
         return voices[voiceId] || voices.voice1;
     }
@@ -134,7 +137,8 @@ class ElevenLabsService {
             voice12: { name: 'Sarah', description: '🌙 Whispery and eerie' },
             voice13: { name: 'Elli', description: '👤 Ghostly and soft' },
             voice14: { name: 'Liam', description: '⚡ Deep and ominous' },
-            voice15: { name: 'Charlotte', description: '🔮 Mysterious female voice' }
+            voice15: { name: 'Charlotte', description: '🔮 Mysterious female voice' },
+            voice16: { name: 'Seer Morganna', description: '🔮✨ Mystical oracle with ancient wisdom' }
         };
     }
 }
