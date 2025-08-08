@@ -65,12 +65,14 @@ def create_meme_video(slides_data, audio_path, output_path, database='apu'):
         opening_image_path = None
         
         if database == 'bobo':
-            slide_logo_path = os.path.join(slides_dir, 'bobo-slide.png')
-            logo_path = os.path.join(slides_dir, 'bobo-logo.png')
+            elements_dir = os.path.join(os.path.dirname(__file__), '..', 'public', 'elements')
+            slide_logo_path = os.path.join(elements_dir, 'bobo-slide.png')
+            logo_path = os.path.join(elements_dir, 'bobo-logo.svg')
             opening_image_path = slide_logo_path if os.path.exists(slide_logo_path) else (logo_path if os.path.exists(logo_path) else None)
         elif database == 'apu':
-            slide_logo_path = os.path.join(slides_dir, 'apu-slide.png')
-            logo_path = os.path.join(slides_dir, 'apu-logo.svg')
+            elements_dir = os.path.join(os.path.dirname(__file__), '..', 'public', 'elements')
+            slide_logo_path = os.path.join(elements_dir, 'apu-slide.png')
+            logo_path = os.path.join(elements_dir, 'apu-logo.svg')
             opening_image_path = slide_logo_path if os.path.exists(slide_logo_path) else (logo_path if os.path.exists(logo_path) else None)
         elif database == 'other':
             # Skip opening slide for 'other' database (CC0 photos) - start directly with content

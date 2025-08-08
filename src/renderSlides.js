@@ -181,12 +181,12 @@ class SlideRenderer {
             let logoPath, slideName, shouldShowLogo = false, isSpecialSlide = false;
             
             if (database.toLowerCase() === 'bobo') {
-                logoPath = path.join(this.slidesDir, 'bobo-logo.png');
+                logoPath = path.join(__dirname, '../public/elements/bobo-logo.svg');
                 slideName = 'bobo-slide';
                 isSpecialSlide = filename.includes(slideName) || memeUrl.includes(`${slideName}.png`);
                 shouldShowLogo = !isSpecialSlide && await this.fileExists(logoPath);
             } else if (database.toLowerCase() === 'apu') {
-                logoPath = path.join(this.slidesDir, 'apu-logo.svg');
+                logoPath = path.join(__dirname, '../public/elements/apu-logo.svg');
                 slideName = 'apu-slide';
                 isSpecialSlide = filename.includes(slideName) || memeUrl.includes(`${slideName}.png`);
                 shouldShowLogo = !isSpecialSlide && await this.fileExists(logoPath);
